@@ -9,13 +9,16 @@ from .settings import settings
 # - list_run_files(run_id: str) -> List[str]
 # - finalize_run(run_id: str) -> Path (zip path)
 
+
 def create_run() -> str:
     # create a run directory
     from uuid import uuid4
+
     run_id = uuid4().hex[:12]
     (settings.RUNS_DIR / run_id).mkdir(parents=True, exist_ok=True)
     print(f"[orchestrator] create_run -> {run_id}")
     return run_id
+
 
 def kickoff_generation(run_id: str, payload: Dict) -> Dict:
     print(f"[orchestrator] kickoff_generation run_id={run_id}")
@@ -26,14 +29,17 @@ def kickoff_generation(run_id: str, payload: Dict) -> Dict:
     # - return { "accepted": True, "run_id": run_id } or richer status
     return {"accepted": True, "run_id": run_id}
 
+
 def list_run_files(run_id: str) -> List[str]:
     folder = settings.RUNS_DIR / run_id
     files = [str(p) for p in folder.glob("*") if p.is_file()]
     print(f"[orchestrator] list_run_files {run_id} -> {len(files)} files")
     return files
 
+
 def finalize_run(run_id: str) -> Path:
     import shutil
+
     folder = settings.RUNS_DIR / run_id
     zip_path = settings.RUNS_DIR / f"{run_id}.zip"
     shutil.make_archive(str(zip_path.with_suffix("")), "zip", folder)

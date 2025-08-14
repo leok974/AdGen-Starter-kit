@@ -6,6 +6,7 @@ import os
 
 from typing import List
 
+
 class AppSettings(BaseSettings):
     # MODE: "api" (use Comfy API) or "hotfolder"
     COMFY_MODE: str = Field(default=os.getenv("COMFY_MODE", "api"))
@@ -29,7 +30,6 @@ class AppSettings(BaseSettings):
             return v
         raise ValueError(v)
 
-
     @field_validator("COMFY_MODE")
     @classmethod
     def _mode_ok(cls, v: str) -> str:
@@ -44,7 +44,9 @@ class AppSettings(BaseSettings):
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+
 settings = AppSettings()
+
 
 def dump_settings_banner() -> str:
     return (

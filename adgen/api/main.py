@@ -3,7 +3,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Dict
 from .settings import settings, dump_settings_banner
 from .orchestrator import create_run, kickoff_generation, list_run_files, finalize_run
 
@@ -18,6 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class GenerateBody(BaseModel):
     prompt: str
     negative_prompt: str | None = None
@@ -26,18 +26,22 @@ class GenerateBody(BaseModel):
     mood_image: str | None = None
     # add any other fields you pass from the frontend
 
+
 @app.on_event("startup")
 async def on_startup():
     print(dump_settings_banner())
     print("[startup] FastAPI started. /health and /docs should be live.")
 
+
 @app.get("/")
 def root():
     return {"status": "ok"}
 
+
 @app.get("/health")
 def health():
     return {"ok": True}
+
 
 @app.post("/generate")
 def generate(body: GenerateBody):
@@ -49,6 +53,7 @@ def generate(body: GenerateBody):
         print("[/generate] ERROR:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/runs/{run_id}/files")
 def get_run_files(run_id: str):
     try:
@@ -58,6 +63,7 @@ def get_run_files(run_id: str):
         print("[/runs/:id/files] ERROR:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/finalize/{run_id}")
 def finalize(run_id: str):
     try:
@@ -66,6 +72,7 @@ def finalize(run_id: str):
     except Exception as e:
         print("[/finalize/:id] ERROR:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Optional direct download
 @app.get("/download/{run_id}")
