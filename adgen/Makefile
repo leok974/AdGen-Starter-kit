@@ -20,7 +20,7 @@ COMPOSE_FILE := docker-compose.dev.yml
 
 up:
 	@echo "Starting up services..."
-	docker compose -f $(COMPOSE_FILE) build --pull=never
+	docker compose -f $(COMPOSE_FILE) build --pull=never || docker compose -f $(COMPOSE_FILE) build
 	docker compose -f $(COMPOSE_FILE) up -d
 
 down:

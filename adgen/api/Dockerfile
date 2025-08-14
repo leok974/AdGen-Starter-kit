@@ -17,7 +17,7 @@ COPY --from=builder /opt/venv /opt/venv
 # Make sure uvicorn/python from the venv are first on PATH
 ENV PATH="/opt/venv/bin:${PATH}"
 # Copy only the sources we need
-COPY main.py settings.py orchestrator.py ./
+COPY main.py settings.py orchestrator.py server.py ./
 EXPOSE 8000
 # Use the venv's uvicorn directly
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "server.py"]
