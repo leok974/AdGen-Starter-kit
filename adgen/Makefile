@@ -1,9 +1,12 @@
+COMPOSE_FILE=adgen/docker-compose.dev.yml
+COMPOSE=docker compose
+
 up:
-	docker compose -f docker-compose.dev.yml build
-	docker compose -f docker-compose.dev.yml up -d
+	$(COMPOSE) -f $(COMPOSE_FILE) build
+	$(COMPOSE) -f $(COMPOSE_FILE) up -d
 
 down:
-	docker compose -f docker-compose.dev.yml down
+	$(COMPOSE) -f $(COMPOSE_FILE) down
 
 logs:
-	docker compose -f docker-compose.dev.yml logs -f --tail=200
+	$(COMPOSE) -f $(COMPOSE_FILE) logs -f --tail=200
