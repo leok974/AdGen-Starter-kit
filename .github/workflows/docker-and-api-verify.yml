@@ -13,12 +13,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r adgen/api/requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r adgen/api/requirements.txt
 
       - name: Run tests
         run: |
@@ -29,9 +31,12 @@ jobs:
         run: |
           cd adgen
           uvicorn api.main:app --host 0.0.0.0 --port 8000 &
-          sleep 5
-          curl -f http://localhost:8000/
-          curl -f http://localhost:8000/health
+          for i in {1..10}; do
+            curl -f http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          echo "Health check failed"
+          exit 1
 
   docker-build-test:
     runs-on: ubuntu-latest
@@ -48,6 +53,9 @@ jobs:
       - name: Run API container and check endpoints
         run: |
           docker run -d -p 8000:8000 --name adgen-api adgen-api:verify
-          sleep 5
-          curl -f http://localhost:8000/
-          curl -f http://localhost:8000/health
+          for i in {1..10}; do
+            curl -f http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          echo "Health check failed"
+          exit 1
