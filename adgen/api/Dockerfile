@@ -1,16 +1,19 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.11-slim AS builder
-WORKDIR /app
-COPY requirements.txt requirements.txt
-RUN python -m pip install --upgrade pip
-RUN python -m venv /opt/venv
-RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
+# Builder (Google mirror to avoid Docker Hub)
+FROM mirror.gcr.io/library/python:3.11-slim AS builder
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip && \
+    python -m venv /opt/venv && . /opt/venv/bin/activate && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Runtime (distroless python)
 FROM gcr.io/distroless/python3-debian12
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:${PATH}"
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
-ENV PYTHONPATH=/opt/venv/lib/python3.11/site-packages
 COPY main.py settings.py orchestrator.py ./
 EXPOSE 8000
-CMD ["/usr/bin/python3.11", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
