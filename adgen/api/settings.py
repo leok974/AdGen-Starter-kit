@@ -8,7 +8,7 @@ class AppSettings(BaseSettings):
     # MODE: "api" (use Comfy API) or "hotfolder"
     COMFY_MODE: str = Field(default=os.getenv("COMFY_MODE", "api"))
     COMFY_API: AnyHttpUrl | None = os.getenv("COMFY_API") or "http://127.0.0.1:8188"
-    RUNS_DIR: Path = Path(os.getenv("RUNS_DIR", "../runs")).resolve()
+    RUNS_DIR: Path = Path(os.getenv("RUNS_DIR", "adgen/runs")).resolve()
 
     @field_validator("COMFY_MODE")
     @classmethod
