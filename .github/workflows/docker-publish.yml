@@ -21,7 +21,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GAR
+        run: |
+          echo "${{ secrets.GCP_SA_KEY }}" > $HOME/gcp.json
+          gcloud auth activate-service-account --key-file=$HOME/gcp.json
+          gcloud auth configure-docker ${{ secrets.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Build and push (GHCR + GAR)
         uses: docker/build-push-action@v5
         with:
           context: ./adgen/api
@@ -29,6 +38,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/api:latest
             ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+            ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:latest
+            ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}
 
   deploy-to-cloud-run:
     needs: build-and-push-ghcr
@@ -44,5 +55,15 @@ jobs:
         uses: 'google-github-actions/deploy-cloudrun@v2'
         with:
           service: 'adgen-api'
-          image: 'ghcr.io/${{ github.repository }}/api:${{ github.sha }}'
+          image: '${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}'
           region: 'us-central1'
+          flags: '--allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=80 --port=$PORT'
+          env_vars: 'ENV=staging'
+
+      - id: url
+        run: echo "SERVICE_URL=$(gcloud run services describe adgen-api --region us-central1 --format='value(status.url)')" >> $GITHUB_OUTPUT
+
+      - name: Smoke test
+        run: |
+          for i in {1..20}; do curl -sf ${{ steps.url.outputs.SERVICE_URL }}/health && break || sleep 2; done
+          curl -sf ${{ steps.url.outputs.SERVICE_URL }}/
