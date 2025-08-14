@@ -4,19 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict
-from settings import settings, dump_settings_banner
-from orchestrator import create_run, kickoff_generation, list_run_files, finalize_run
+from .settings import settings, dump_settings_banner
+from .orchestrator import create_run, kickoff_generation, list_run_files, finalize_run
 
 app = FastAPI(title="AdGen API", version="0.1.0")
 
 # Broad CORS for local dev (frontend on :3000 or :5173)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", "http://127.0.0.1:3000",
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:8000", "http://127.0.0.1:8000",
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,6 +30,10 @@ class GenerateBody(BaseModel):
 async def on_startup():
     print(dump_settings_banner())
     print("[startup] FastAPI started. /health and /docs should be live.")
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
 
 @app.get("/health")
 def health():

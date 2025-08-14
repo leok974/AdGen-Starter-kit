@@ -1,0 +1,91 @@
+name: Docker and API Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feat/add-health-and-root-endpoints ]
+  pull_request:
+
+jobs:
+  bare-metal-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-py311-${{ hashFiles('adgen/api/requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r adgen/requirements-dev.txt
+          pip install -r adgen/api/requirements.txt
+
+      - name: Lint with ruff
+        run: ruff check adgen/api
+
+      - name: Check formatting with black
+        run: black --check adgen/api
+
+      - name: Run tests
+        run: |
+          cd adgen
+          PYTHONPATH=. pytest -q api/tests/ --junitxml=pytest-report.xml
+
+      - name: Upload pytest report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: adgen/pytest-report.xml
+
+      - name: Run API and check endpoints
+        run: |
+          cd adgen
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          for i in {1..10}; do
+            if curl -f http://localhost:8000/health; then
+              echo "Health check passed"
+              kill $(jobs -p) || true
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check failed"
+          kill $(jobs -p) || true
+          exit 1
+
+  docker-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker login (Hub)
+        if: ${{ secrets.DOCKERHUB_USERNAME && secrets.DOCKERHUB_TOKEN }}
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build API image
+        run: docker build --pull -t adgen-api:verify ./adgen/api
+
+      - name: Run API container and check endpoints
+        run: |
+          docker run -d -p 8000:8000 --name adgen-api adgen-api:verify
+          for i in {1..10}; do
+            if curl -f http://localhost:8000/health; then
+              echo "Health check passed"
+              docker kill adgen-api || true
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check failed"
+          docker kill adgen-api || true
+          exit 1
