@@ -66,5 +66,7 @@ jobs:
 
       - name: Smoke test
         run: |
-          for i in {1..20}; do curl -sf ${{ steps.deploy.outputs.url }}/health && break || sleep 2; done
-          curl -sf ${{ steps.deploy.outputs.url }}/
+          for i in {1..20}; do
+            curl -sf "${{ steps.deploy.outputs.url }}/health" && break || sleep 2
+          done
+          curl -sf "${{ steps.deploy.outputs.url }}/"
