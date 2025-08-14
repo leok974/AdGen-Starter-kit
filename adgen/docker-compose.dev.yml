@@ -1,26 +1,16 @@
 version: "3.9"
-
 services:
   api:
-    # Build locally from our Dockerfile (no image pulls required)
     build:
-      context: ./api
+      context: ./adgen/api
       dockerfile: Dockerfile
-      # Optional: disable remote pulls on newer Compose; ignored by older versions
-      # pull: false
     ports:
       - "8000:8000"
     working_dir: /app
     env_file:
-      - ./.env
-    # If you want live reload during dev, uncomment the two lines below
-    # volumes:
-    #   - ./api:/app
-    # command: ["uvicorn","main:app","--host","0.0.0.0","--port","8000","--reload"]
-
-    # Healthcheck must use the venv's python inside the image (distroless doesn't have /usr/bin/python)
+      - ./adgen/.env
     healthcheck:
-      test: [ "CMD", "/opt/venv/bin/python3", "-c", "import http.client as h; c=h.HTTPConnection('localhost',8000,timeout=3); c.request('GET','/health'); print(c.getresponse().status==200)" ]
+      test: ["CMD", "/opt/venv/bin/python3", "-c", "import http.client as h; c=h.HTTPConnection('localhost',8000,timeout=3); c.request('GET','/health'); print(c.getresponse().status==200)"]
       interval: 10s
       timeout: 5s
       retries: 5
