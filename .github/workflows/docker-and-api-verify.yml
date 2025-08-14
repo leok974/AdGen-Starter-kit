@@ -1,0 +1,53 @@
+name: Docker and API Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feat/add-health-and-root-endpoints ]
+  pull_request:
+
+jobs:
+  bare-metal-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r adgen/api/requirements.txt
+
+      - name: Run tests
+        run: |
+          cd adgen
+          PYTHONPATH=. pytest api/tests/
+
+      - name: Run API and check endpoints
+        run: |
+          cd adgen
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+          curl -f http://localhost:8000/
+          curl -f http://localhost:8000/health
+
+  docker-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker login (Hub)
+        if: ${{ secrets.DOCKERHUB_USERNAME && secrets.DOCKERHUB_TOKEN }}
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build API image
+        run: docker build --pull -t adgen-api:verify ./adgen/api
+
+      - name: Run API container and check endpoints
+        run: |
+          docker run -d -p 8000:8000 --name adgen-api adgen-api:verify
+          sleep 5
+          curl -f http://localhost:8000/
+          curl -f http://localhost:8000/health

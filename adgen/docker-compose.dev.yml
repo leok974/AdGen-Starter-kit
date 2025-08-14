@@ -2,13 +2,13 @@ version: "3.9"
 services:
   api:
     build:
-      context: ./adgen/api
+      context: ./api
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     working_dir: /app
     env_file:
-      - ./adgen/.env
+      - ./.env
     healthcheck:
       test: ["CMD", "/opt/venv/bin/python3", "-c", "import http.client as h; c=h.HTTPConnection('localhost',8000,timeout=3); c.request('GET','/health'); print(c.getresponse().status==200)"]
       interval: 10s
