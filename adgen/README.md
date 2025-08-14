@@ -12,6 +12,9 @@ cd api && pip install -r requirements.txt && uvicorn main:app --reload --port 80
 ## Run frontend
 cd web && npm i && NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run dev
 
+## Environment Variables
+- `CORS_ORIGINS`: Comma-separated list of allowed CORS origins (e.g., "http://localhost:3000,http://localhost:5173"). Defaults to a list of common local development ports.
+
 ## Where files go
 - Uploads land in `assets/uploads/`
 - Outputs land in `runs/<run_id>/`

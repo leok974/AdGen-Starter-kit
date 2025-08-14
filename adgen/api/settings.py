@@ -4,11 +4,31 @@ from pydantic import AnyHttpUrl, Field, field_validator
 from pathlib import Path
 import os
 
+from typing import List
+
 class AppSettings(BaseSettings):
     # MODE: "api" (use Comfy API) or "hotfolder"
     COMFY_MODE: str = Field(default=os.getenv("COMFY_MODE", "api"))
     COMFY_API: AnyHttpUrl | None = os.getenv("COMFY_API") or "http://127.0.0.1:8188"
     RUNS_DIR: Path = Path(os.getenv("RUNS_DIR", "adgen/runs")).resolve()
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _assemble_cors_origins(cls, v: str | List[str]) -> List[str] | str:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
+
 
     @field_validator("COMFY_MODE")
     @classmethod
