@@ -17,6 +17,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-py311-${{ hashFiles('adgen/api/requirements.txt') }}
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -32,10 +38,15 @@ jobs:
           cd adgen
           uvicorn api.main:app --host 0.0.0.0 --port 8000 &
           for i in {1..10}; do
-            curl -f http://localhost:8000/health && exit 0
+            if curl -f http://localhost:8000/health; then
+              echo "Health check passed"
+              kill $(jobs -p) || true
+              exit 0
+            fi
             sleep 2
           done
           echo "Health check failed"
+          kill $(jobs -p) || true
           exit 1
 
   docker-build-test:
@@ -54,8 +65,13 @@ jobs:
         run: |
           docker run -d -p 8000:8000 --name adgen-api adgen-api:verify
           for i in {1..10}; do
-            curl -f http://localhost:8000/health && exit 0
+            if curl -f http://localhost:8000/health; then
+              echo "Health check passed"
+              docker kill adgen-api || true
+              exit 0
+            fi
             sleep 2
           done
           echo "Health check failed"
+          docker kill adgen-api || true
           exit 1
