@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+.pytest_cache/
+
+# Node/Next
+node_modules/
+.next/
+.out/
+dist/
+.vercel/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AdGen project
+runs/
+assets/uploads/
+assets/mood/*.jpg
+assets/logos/*.png
+!assets/mood/.gitkeep
+!assets/logos/.gitkeep
+loras/
+control/
+comfy/output/
+comfy/models/
+comfy/checkpoints/
+*.safetensors
+*.ckpt
+*.bin
+*.pt
+
+# Env
+.env
+web/.env.local

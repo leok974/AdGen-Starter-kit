@@ -1,0 +1,6 @@
+:root { --bg: #0b0b0b; --fg: #fafafa; }
+html, body { background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui; }
+button { padding: .6rem 1rem; border-radius: .75rem; }
+input, select { color: #111; border-radius: .5rem; padding: .5rem; }
+.card { border: 1px solid #222; border-radius: 1rem; padding: 1rem; background: #111; }
+.grid { display: grid; gap: 1rem; }

@@ -1,0 +1,16 @@
+{
+  "brand": "VerdeWave",
+  "product": "Eco sports water bottle",
+  "audience": "Gen Z, active, sustainability-minded",
+  "tone": "energetic, clean, modern",
+  "platforms": ["tiktok", "instagram", "youtube"],
+  "durations_sec": [6, 10],
+  "brand_colors_hex": ["#00D084", "#111111", "#FFFFFF"],
+  "logo_path": "assets/logos/verdewave.png",
+  "moodboard_paths": ["assets/mood/mb1.jpg"],
+  "key_benefits": ["BPA-free", "keeps cold 24h", "recycled aluminum"],
+  "usps": ["Plant-based cap", "1% to oceans"],
+  "shot_style": "studio+outdoor hybrid, soft backlight, macro detail",
+  "cta": "Refill. Reuse. Go.",
+  "seed": 12345
+}
