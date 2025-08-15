@@ -23,29 +23,30 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-py311-${{ hashFiles('adgen/api/requirements.txt') }}
 
-      - name: Install dependencies
+      - name: Install app deps
         run: |
-          python -m pip install --upgrade pip
-          pip install -r adgen/requirements-dev.txt
-          pip install -r adgen/api/requirements.txt
+          python -m pip install -U pip
+          if [ -f adgen/api/requirements.txt ]; then
+            pip install -r adgen/api/requirements.txt
+          else
+            pip install fastapi "uvicorn[standard]" pydantic pydantic-settings starlette httpx
+          fi
 
-      - name: Lint with ruff
-        run: ruff check adgen/api
-
-      - name: Check formatting with black
-        run: black --check adgen/api
-
-      - name: Run tests
+      - name: Install dev deps
         run: |
-          cd adgen
-          PYTHONPATH=. pytest -q api/tests/ --junitxml=pytest-report.xml
+          if [ -f adgen/requirements-dev.txt ]; then
+            pip install -r adgen/requirements-dev.txt
+          else
+            pip install ruff black pytest
+          fi
 
-      - name: Upload pytest report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-report
-          path: adgen/pytest-report.xml
+      - name: Lint & Test
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          if command -v ruff >/dev/null 2>&1; then ruff check .; fi
+          if command -v black >/dev/null 2>&1; then black --check .; fi
+          if command -v pytest >/dev/null 2>&1; then pytest -q; fi
 
       - name: Run API and check endpoints
         run: |
