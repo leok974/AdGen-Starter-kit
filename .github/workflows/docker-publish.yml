@@ -14,32 +14,64 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to the Container registry
+      # Lowercase repo for GHCR tags (GHCR requires all-lowercase)
+      - name: Prepare image tags
+        run: |
+          echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      - name: 'Authenticate to Google Cloud'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
 
       - name: Configure Docker for GAR
-        run: |
-          echo "${{ secrets.GCP_SA_KEY }}" > $HOME/gcp.json
-          gcloud auth activate-service-account --key-file=$HOME/gcp.json
-          gcloud auth configure-docker ${{ secrets.GAR_LOCATION }}-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker "${{ secrets.GAR_LOCATION }}-docker.pkg.dev" --quiet
 
-      - name: Build and push (GHCR + GAR)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./adgen/api
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/api:latest
-            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
-            ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:latest
-            ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build once, push to GHCR + GAR with SHA and latest tags
+      - name: Build & Push (GHCR + GAR)
+        run: |
+          GHCR_SHA="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:${GITHUB_SHA}"
+          GHCR_LATEST="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:latest"
+
+          GAR_SHA="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${GITHUB_SHA}"
+          GAR_LATEST="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:latest"
+
+          echo "GHCR_SHA=$GHCR_SHA"
+          echo "GHCR_LATEST=$GHCR_LATEST"
+          echo "GAR_SHA=$GAR_SHA"
+          echo "GAR_LATEST=$GAR_LATEST"
+
+          # If your Dockerfile is NOT at repo root, add:  -f path/to/Dockerfile  path/to/build/context
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            -f adgen/api/Dockerfile \
+            --tag "$GHCR_SHA" \
+            --tag "$GHCR_LATEST" \
+            --tag "$GAR_SHA" \
+            --tag "$GAR_LATEST" \
+            .
+
+          # Expose for later steps (deploy uses GAR_SHA or GAR_LATEST)
+          echo "GAR_IMAGE_SHA=$GAR_SHA" >> $GITHUB_ENV
+          echo "GAR_IMAGE_LATEST=$GAR_LATEST" >> $GITHUB_ENV
 
   deploy-to-cloud-run:
     needs: build-and-push-ghcr
@@ -66,7 +98,9 @@ jobs:
 
       - name: Smoke test
         run: |
+          set -e
           for i in {1..20}; do
+            echo "Health attempt $i"
             curl -sf "${{ steps.deploy.outputs.url }}/health" && break || sleep 2
           done
           curl -sf "${{ steps.deploy.outputs.url }}/"
