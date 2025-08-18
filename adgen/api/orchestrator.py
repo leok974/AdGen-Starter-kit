@@ -1,7 +1,7 @@
 # api/orchestrator.py
 from typing import Dict, List
 from pathlib import Path
-from .settings import settings
+from settings import settings
 
 # Expected external functions the API calls:
 # - create_run() -> str

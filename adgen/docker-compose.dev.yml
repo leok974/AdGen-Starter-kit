@@ -1,14 +1,8 @@
+version: "3.9"
 services:
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
-    working_dir: /app
-    volumes:
-      - ./api:/app
-    entrypoint: ""   # keep this, it clears any python3 entrypoint
-    command: ["uvicorn","main:app","--host","0.0.0.0","--port","8000","--reload"]
     ports:
       - "8000:8000"
-    environment:
-      - PYTHONPATH=/app

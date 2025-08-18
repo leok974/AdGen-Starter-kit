@@ -3,8 +3,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from .settings import settings, dump_settings_banner
-from .orchestrator import create_run, kickoff_generation, list_run_files, finalize_run
+from settings import settings, dump_settings_banner
+from orchestrator import create_run, kickoff_generation, list_run_files, finalize_run
 
 app = FastAPI(title="AdGen API", version="0.1.0")
 
