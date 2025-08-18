@@ -1,8 +1,15 @@
-version: "3.9"
 services:
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - ./api:/app
+    environment:
+      - PYTHONPATH=/app
+      - PORT=8000
+    entrypoint: ""   # clear any base image entrypoint
+    command: ["python","server.py"]
     ports:
       - "8000:8000"
