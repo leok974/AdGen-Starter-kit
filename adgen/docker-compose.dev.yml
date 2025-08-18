@@ -1,15 +1,26 @@
+# adgen/docker-compose.dev.yml
 services:
   api:
+    container_name: adgen-api
     build:
       context: ./api
       dockerfile: Dockerfile
-    working_dir: /app
-    volumes:
-      - ./api:/app
     environment:
-      - PYTHONPATH=/app
       - PORT=8000
-    entrypoint: ""   # clear any base image entrypoint
-    command: ["python","server.py"]
+      - COMFY_MODE=api
+      - COMFY_API=http://host.docker.internal:8188/
+      - LOG_LEVEL=info
     ports:
       - "8000:8000"
+    volumes:
+      - ./api:/app
+      - ./api/adgen/runs:/app/adgen/runs
+    command: ["python", "server.py"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
