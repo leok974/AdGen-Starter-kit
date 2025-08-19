@@ -1,4 +1,6 @@
 # adgen/docker-compose.dev.yml
+name: adgen
+
 services:
   api:
     container_name: adgen-api
@@ -21,6 +23,21 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
-      interval: 10s
+      interval: 30s
       timeout: 3s
       retries: 10
+
+    # Live-reload via Docker Compose Watch
+    develop:
+      watch:
+        # Restart container when source files change
+        - action: restart
+          path: ./api
+          ignore:
+            - adgen/runs/**
+            - .venv/**
+            - __pycache__/**
+            - "*.pyc"
+        # Rebuild image if deps change
+        - action: rebuild
+          path: ./api/requirements.txt
