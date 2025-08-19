@@ -8,7 +8,7 @@ services:
     environment:
       - PORT=8000
       - COMFY_MODE=api
-      - COMFY_API=http://host.docker.internal:8188/
+      - COMFY_API=http://host.docker.internal:8188
       - LOG_LEVEL=info
     ports:
       - "8000:8000"
