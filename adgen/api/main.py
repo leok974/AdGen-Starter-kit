@@ -10,9 +10,8 @@ from orchestrator import create_run, kickoff_generation, list_run_files, finaliz
 app = FastAPI(title="AdGen API", version="0.1.0")
 
 # --- Configuration ---
-# Get CORS origins from environment variable, default to common local dev ports
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000").split(",")
-RUNS_DIR = Path(os.getenv("RUNS_DIR", "adgen/runs")).resolve()
+RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 
 # --- Middleware ---
 app.add_middleware(
@@ -22,7 +21,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 class GenerateBody(BaseModel):
     prompt: str
@@ -37,6 +35,7 @@ async def on_startup():
     print("=== AdGen API Started ===")
     print(f"RUNS_DIR: {RUNS_DIR}")
     print(f"CORS origins: {CORS_ORIGINS}")
+    print(f"GRAPH_PATH: {os.getenv('GRAPH_PATH')}")
     print("See /docs for API schema.")
     print("=========================")
 
@@ -48,16 +47,16 @@ def root():
 
 @app.get("/health")
 def health():
-    # In a real app, this would check DB connections, etc.
     return {"ok": True}
 
 
 @app.post("/generate")
 def generate(body: GenerateBody):
     try:
-        run_id = create_run()
-        prompt_id = kickoff_generation(run_id, body.model_dump())
-        return {"run_id": run_id, "status": "queued", "prompt_id": prompt_id}
+        run_info = create_run(payload=body.model_dump())
+        run_id = run_info["run_id"]
+        result = kickoff_generation(run_id, payload=body.model_dump())
+        return result
     except Exception as e:
         print(f"[/generate] ERROR: {repr(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -76,8 +75,8 @@ def get_run_files(run_id: str):
 @app.post("/finalize/{run_id}")
 def finalize(run_id: str):
     try:
-        zip_path = finalize_run(run_id)
-        return {"run_id": run_id, "zip_path": str(zip_path)}
+        result = finalize_run(run_id)
+        return result
     except Exception as e:
         print(f"[/finalize/{run_id}] ERROR: {repr(e)}")
         raise HTTPException(status_code=500, detail=str(e))

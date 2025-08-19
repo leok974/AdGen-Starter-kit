@@ -1,147 +1,195 @@
-import os
-import json
-import uuid
-import time
-import shutil
+# orchestrator.py — env-driven ComfyUI orchestrator
+from __future__ import annotations
+import os, uuid, json, time, shutil
+from typing import Dict, List, Any
 from pathlib import Path
-from typing import Dict, List
 import httpx
 
-# --- Environment Setup ---
-COMFY_API_URL = os.getenv("COMFY_API", "http://127.0.0.1:8188")
-RUNS_DIR = Path(os.getenv("RUNS_DIR", "adgen/runs")).resolve()
-GRAPH_PATH = Path(os.getenv("GRAPH_PATH", "adgen/graphs/qwen.json")).resolve()
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "2")) # seconds
+# --- Env config ---
+COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
+RUNS_DIR  = os.getenv("RUNS_DIR", "/app/adgen/runs")
+GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
+POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "0.8"))
+POLL_TIMEOUT  = float(os.getenv("POLL_TIMEOUT", "180"))
 
-# Ensure base directories exist
-RUNS_DIR.mkdir(parents=True, exist_ok=True)
-if not GRAPH_PATH.exists():
+Path(RUNS_DIR).mkdir(parents=True, exist_ok=True)
+if not Path(GRAPH_PATH).exists():
     raise FileNotFoundError(f"Graph file not found at: {GRAPH_PATH}")
 
+# --- Helpers ---
+def _ensure_dir(p: str | Path) -> None:
+    Path(p).mkdir(parents=True, exist_ok=True)
 
-def _get_run_path(run_id: str) -> Path:
-    """Returns the validated path for a given run_id."""
-    if not run_id or not isinstance(run_id, str) or len(run_id) > 16:
-        raise ValueError("Invalid run_id specified.")
-    run_path = (RUNS_DIR / run_id).resolve()
-    if not run_path.parent == RUNS_DIR:
-        raise ValueError("Invalid run_id, path traversal detected.")
-    return run_path
+def _run_dir(run_id: str) -> str:
+    d = os.path.join(RUNS_DIR, str(run_id))
+    _ensure_dir(d)
+    return d
 
-def create_run() -> str:
-    """
-    Creates a directory for a new run and returns the run_id.
-    """
-    run_id = uuid.uuid4().hex[:12]
-    run_path = _get_run_path(run_id)
-    run_path.mkdir(parents=True, exist_ok=True)
-    print(f"[orchestrator] Created run '{run_id}' at {run_path}")
-    return run_id
+def _zip_run(run_id: str) -> str:
+    base = os.path.join(RUNS_DIR, str(run_id))
+    shutil.make_archive(base, "zip", _run_dir(run_id))
+    return f"{base}.zip"
 
+def _http() -> httpx.Client:
+    return httpx.Client(base_url=COMFY_API, timeout=60)
 
-def kickoff_generation(run_id: str, payload: Dict) -> str:
-    """
-    Loads the graph, patches it with the prompt, and queues it in ComfyUI.
-    Returns the prompt_id from ComfyUI.
-    """
-    print(f"[orchestrator] Kicking off generation for run_id: {run_id}")
-    run_path = _get_run_path(run_id)
-    prompt_text = payload.get("prompt")
-    if not prompt_text:
-        raise ValueError("Prompt is required in the payload.")
+def _coerce_run_id(v) -> str:
+    if isinstance(v, dict):
+        cand = v.get("run_id") or v.get("id") or (v.get("detail") or {})
+        if isinstance(cand, dict):
+            cand = cand.get("run_id") or cand.get("id")
+        v = cand
+    return str(v or uuid.uuid4().hex[:12])
 
-    # Load and patch the graph
-    with open(GRAPH_PATH, "r") as f:
-        graph = json.load(f)
+# --- Graph helpers ---
+def _load_graph() -> Dict[str, Any]:
+    with open(GRAPH_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    # The prompt node is "6" in the provided qwen.json
-    graph["6"]["inputs"]["text"] = prompt_text
+def _patch_graph_for_run(graph: Dict[str, Any], *, run_id: str, prompt: str, negative: str | None = None) -> Dict[str, Any]:
+    # Set prompt text on CLIPTextEncode nodes
+    for node in graph.values():
+        if node.get("class_type") == "CLIPTextEncode":
+            node.setdefault("inputs", {})
+            title = (node.get("_meta", {}).get("title", "") or "").lower()
+            if "neg" in title and negative:
+                node["inputs"]["text"] = negative
+            elif "neg" not in title:
+                node["inputs"]["text"] = prompt
+    # Ensure SaveImage writes under this run_id
+    for node in graph.values():
+        if node.get("class_type") == "SaveImage":
+            node.setdefault("inputs", {})
+            node["inputs"]["filename_prefix"] = run_id
+    return graph
 
-    # Prepare the request for ComfyUI
-    client_id = str(uuid.uuid4())
-    comfy_payload = {"prompt": graph, "client_id": client_id}
+# --- Comfy helpers ---
+def _submit_prompt(client: httpx.Client, graph: Dict[str, Any], client_id: str) -> str:
+    r = client.post("/prompt", json={"prompt": graph, "client_id": client_id})
+    r.raise_for_status()
+    pid = r.json().get("prompt_id")
+    if not pid:
+        raise RuntimeError(f"ComfyUI did not return prompt_id: {r.text}")
+    return pid
 
-    # Queue the prompt
-    with httpx.Client() as client:
-        url = f"{COMFY_API_URL.rstrip('/')}/prompt"
-        print(f"[orchestrator] Posting to {url}")
-        response = client.post(url, json=comfy_payload)
-        response.raise_for_status()
-        result = response.json()
+def _poll_history(client: httpx.Client, prompt_id: str) -> Dict[str, Any]:
+    t0 = time.time()
+    while time.time() - t0 < POLL_TIMEOUT:
+        r = client.get(f"/history/{prompt_id}")
+        if r.status_code == 200 and r.text.strip() not in ("", "{}"):
+            return r.json()
+        time.sleep(POLL_INTERVAL)
+    raise TimeoutError("ComfyUI job timed out")
 
-    if "prompt_id" not in result:
-        raise RuntimeError(f"ComfyUI did not return a prompt_id. Response: {result}")
+def _iter_images(hist: Dict[str, Any]) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    def collect(outputs: Dict[str, Any]):
+        for node_data in outputs.values():
+            for im in node_data.get("images") or []:
+                if "filename" in im:
+                    out.append({
+                        "filename": im["filename"],
+                        "subfolder": im.get("subfolder", ""),
+                        "type": im.get("type", "output"),
+                    })
+    if "outputs" in hist:
+        collect(hist["outputs"])
+    else:
+        for v in hist.values():
+            if isinstance(v, dict) and "outputs" in v:
+                collect(v["outputs"])
+    return out
 
-    prompt_id = result["prompt_id"]
-    print(f"[orchestrator] ComfyUI accepted job. prompt_id: {prompt_id}")
+# --- API functions used by FastAPI routes ---
+def create_run(payload: Dict | None = None) -> Dict:
+    payload = payload or {}
+    run_id = payload.get("run_id") or uuid.uuid4().hex[:12]
+    meta_path = os.path.join(_run_dir(run_id), "meta.json")
+    with open(meta_path, "wb") as f:
+        f.write(json.dumps({"payload": payload}, indent=2).encode())
+    print(f"[orchestrator] create_run -> {run_id}")
+    return {"run_id": run_id, "status": "created", "input": payload}
 
-    # Save prompt_id for finalize_run
-    (run_path / "prompt_id.txt").write_text(prompt_id)
+def kickoff_generation(run_id: str, payload: Dict | None = None) -> Dict:
+    run_id = _coerce_run_id(run_id)
+    payload = payload or {}
+    prompt = payload.get("prompt") or "sprite soda on a rock on water surrounded by a valley"
+    negative = payload.get("negative_prompt")
+    seed = payload.get("seed")
 
-    return prompt_id
+    graph = _load_graph()
+    graph = _patch_graph_for_run(graph, run_id=run_id, prompt=prompt, negative=negative)
+    if seed is not None:
+        for node in graph.values():
+            if node.get("class_type", "").lower().endswith("ksampler"):
+                node.setdefault("inputs", {})["seed"] = int(seed)
 
+    with _http() as client:
+        prompt_id = _submit_prompt(client, graph, client_id=run_id)
 
-def list_run_files(run_id: str) -> List[str]:
-    """
-    Lists all files in the specified run directory.
-    """
-    run_path = _get_run_path(run_id)
-    if not run_path.exists():
-        return []
-    return [str(p.name) for p in run_path.glob("*") if p.is_file()]
+    # Save prompt_id
+    meta_path = os.path.join(_run_dir(run_id), "meta.json")
+    try:
+        meta = {}
+        if os.path.exists(meta_path):
+            meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
+        meta.update({"prompt_id": prompt_id, "prompt": prompt, "negative_prompt": negative})
+        with open(meta_path, "wb") as f:
+            f.write(json.dumps(meta, indent=2).encode())
+    except Exception:
+        pass
 
+    print(f"[orchestrator] kickoff_generation run_id={run_id} prompt_id={prompt_id}")
+    return {"run_id": run_id, "status": "started", "prompt_id": prompt_id}
 
-def finalize_run(run_id: str) -> Path:
-    """
-    Polls ComfyUI for results, downloads images, and zips the run directory.
-    """
-    print(f"[orchestrator] Finalizing run for run_id: {run_id}")
-    run_path = _get_run_path(run_id)
-    prompt_id_file = run_path / "prompt_id.txt"
+def list_run_files(run_id: str) -> List[Dict]:
+    run_id = _coerce_run_id(run_id)
+    base = _run_dir(run_id)
+    results: List[Dict] = []
+    for root, _, files in os.walk(base):
+        for fn in files:
+            if fn == "meta.json":
+                continue
+            p = os.path.join(root, fn)
+            rel = os.path.relpath(p, base).replace("\\", "/")
+            results.append({"path": rel, "size": os.path.getsize(p)})
+    print(f"[orchestrator] list_run_files {run_id} -> {len(results)} files")
+    return results
 
-    if not prompt_id_file.exists():
-        raise FileNotFoundError(f"Could not find prompt_id.txt for run_id: {run_id}")
+def finalize_run(run_id: str) -> Dict:
+    run_id = _coerce_run_id(run_id)
+    meta_path = os.path.join(_run_dir(run_id), "meta.json")
+    try:
+        meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
+    except Exception:
+        meta = {}
 
-    prompt_id = prompt_id_file.read_text().strip()
+    payload = meta.get("payload", {}) if isinstance(meta.get("payload"), dict) else {}
+    prompt = payload.get("prompt") or "sprite soda on a rock on water surrounded by a valley"
+    negative = payload.get("negative_prompt")
 
-    with httpx.Client(timeout=30) as client:
-        # 1. Poll for history
-        history_url = f"{COMFY_API_URL.rstrip('/')}/history/{prompt_id}"
-        print(f"[orchestrator] Polling history at {history_url}")
-        while True:
-            response = client.get(history_url)
-            response.raise_for_status()
-            history = response.json()
-            if prompt_id in history:
-                print(f"[orchestrator] History found for prompt_id: {prompt_id}")
-                break
-            print(f"[orchestrator] Waiting for results... (poll in {POLL_INTERVAL}s)")
-            time.sleep(POLL_INTERVAL)
+    images = []
+    with _http() as client:
+        prompt_id = meta.get("prompt_id")
+        if not prompt_id:
+            graph = _load_graph()
+            graph = _patch_graph_for_run(graph, run_id=run_id, prompt=prompt, negative=negative)
+            prompt_id = _submit_prompt(client, graph, client_id=run_id)
+            meta["prompt_id"] = prompt_id
+            with open(meta_path, "wb") as f:
+                f.write(json.dumps(meta, indent=2).encode())
 
-        # 2. Download output images
-        outputs = history[prompt_id].get("outputs", {})
-        for node_id, node_output in outputs.items():
-            if "images" in node_output:
-                for image_data in node_output["images"]:
-                    filename = image_data["filename"]
-                    view_url = f"{COMFY_API_URL.rstrip('/')}/view?filename={filename}"
-                    print(f"[orchestrator] Downloading image: {filename} from {view_url}")
+        hist = _poll_history(client, prompt_id)
+        for im in _iter_images(hist):
+            params = {"filename": im["filename"], "subfolder": im.get("subfolder",""), "type": im.get("type","output")}
+            r = client.get("/view", params=params)
+            r.raise_for_status()
+            out_path = os.path.join(_run_dir(run_id), im["filename"])
+            with open(out_path, "wb") as f:
+                f.write(r.content)
+            images.append({**im, "saved_to": out_path})
 
-                    img_response = client.get(view_url)
-                    img_response.raise_for_status()
-
-                    with open(run_path / filename, "wb") as f:
-                        f.write(img_response.content)
-                    print(f"[orchestrator] Saved image to {run_path / filename}")
-
-    # 3. Zip the run folder
-    zip_path_base = RUNS_DIR / run_id
-    shutil.make_archive(
-        base_name=str(zip_path_base),
-        format='zip',
-        root_dir=run_path
-    )
-    zip_path = zip_path_base.with_suffix(".zip")
-    print(f"[orchestrator] Created zip file: {zip_path}")
-
-    return zip_path
+    files = list_run_files(run_id)
+    zip_path = _zip_run(run_id)
+    print(f"[orchestrator] finalize_run -> zip={zip_path}")
+    return {"run_id": run_id, "images": images, "files": files, "zip": zip_path}
