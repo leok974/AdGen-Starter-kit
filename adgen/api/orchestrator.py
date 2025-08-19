@@ -4,6 +4,11 @@ import os, uuid, json, time, shutil
 from typing import Dict, List, Any
 from pathlib import Path
 import httpx
+import fcntl
+from unittest.mock import MagicMock
+
+# Test mode for CI/mocking
+TEST_MODE = os.getenv("COMFY_MODE", "").lower() == "test"
 
 # --- Env config ---
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
@@ -31,6 +36,23 @@ def _zip_run(run_id: str) -> str:
     return f"{base}.zip"
 
 def _http() -> httpx.Client:
+    if TEST_MODE:
+        # Return mock client for testing
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = {"prompt_id": "test_prompt_123"}
+        mock_client.get.return_value.json.return_value = {
+            "test_prompt_123": {
+                "outputs": {
+                    "test_node": {
+                        "images": [{"filename": "test_image.png", "subfolder": "", "type": "output"}]
+                    }
+                }
+            }
+        }
+        mock_client.get.return_value.content = b"fake_image_data"
+        mock_client.__enter__ = lambda self: self
+        mock_client.__exit__ = lambda self, *args: None
+        return mock_client
     return httpx.Client(base_url=COMFY_API, timeout=60)
 
 def _coerce_run_id(v) -> str:
@@ -172,22 +194,33 @@ def finalize_run(run_id: str) -> Dict:
     with _http() as client:
         prompt_id = meta.get("prompt_id")
         if not prompt_id:
-            graph = _load_graph()
-            graph = _patch_graph_for_run(graph, run_id=run_id, prompt=prompt, negative=negative)
-            prompt_id = _submit_prompt(client, graph, client_id=run_id)
+            if TEST_MODE:
+                prompt_id = "test_prompt_123"
+            else:
+                graph = _load_graph()
+                graph = _patch_graph_for_run(graph, run_id=run_id, prompt=prompt, negative=negative)
+                prompt_id = _submit_prompt(client, graph, client_id=run_id)
             meta["prompt_id"] = prompt_id
             with open(meta_path, "wb") as f:
                 f.write(json.dumps(meta, indent=2).encode())
 
-        hist = _poll_history(client, prompt_id)
-        for im in _iter_images(hist):
-            params = {"filename": im["filename"], "subfolder": im.get("subfolder",""), "type": im.get("type","output")}
-            r = client.get("/view", params=params)
-            r.raise_for_status()
-            out_path = os.path.join(_run_dir(run_id), im["filename"])
+        if TEST_MODE:
+            # Create fake image for testing
+            test_image = {"filename": f"{run_id}_test.png", "subfolder": "", "type": "output"}
+            out_path = os.path.join(_run_dir(run_id), test_image["filename"])
             with open(out_path, "wb") as f:
-                f.write(r.content)
-            images.append({**im, "saved_to": out_path})
+                f.write(b"fake_image_data_for_testing")
+            images.append({**test_image, "saved_to": out_path})
+        else:
+            hist = _poll_history(client, prompt_id)
+            for im in _iter_images(hist):
+                params = {"filename": im["filename"], "subfolder": im.get("subfolder",""), "type": im.get("type","output")}
+                r = client.get("/view", params=params)
+                r.raise_for_status()
+                out_path = os.path.join(_run_dir(run_id), im["filename"])
+                with open(out_path, "wb") as f:
+                    f.write(r.content)
+                images.append({**im, "saved_to": out_path})
 
     files = list_run_files(run_id)
     zip_path = _zip_run(run_id)

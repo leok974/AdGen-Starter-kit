@@ -1,1 +1,122 @@
 # AdGen-Starter-kit
+
+## 🧪 Testing & Deployment
+
+### Smoke Tests
+Run comprehensive API validation:
+
+```bash
+# Local Docker testing
+bash scripts/smoke.sh
+
+# Against deployed service
+bash scripts/smoke.sh https://your-service.run.app
+
+# PowerShell version
+.\scripts\smoke.ps1 -Base "http://localhost:8000" -Prompt "test image"
+```
+
+### Quick Image Generation
+Generate and download images with one command:
+
+```bash
+# Generate image (opens results folder automatically)
+bash scripts/adgen.sh "sprite soda can on ice"
+
+# Custom output location
+OUTPUT_DIR=/tmp/my_art bash scripts/adgen.sh "cyberpunk city at sunset"
+```
+
+### CI/CD
+- **GitHub Actions** runs smoke tests automatically on PRs
+- **Test Mode** allows CI without ComfyUI dependency
+- **Staging deployments** available with `scripts/deploy-staging.sh`
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Basic health check |
+| `/health/detailed` | GET | Health + ComfyUI connectivity |
+| `/generate` | POST | Create new run |
+| `/finalize/{run_id}` | POST | Process and download images |
+| `/runs/{run_id}/files` | GET | List run files |
+| `/download/{run_id}` | GET | Download zip archive |
+| `/runs/{run_id}` | DELETE | Delete run and files |
+
+### Environment Variables
+
+#### Core Settings
+- `COMFY_API` - ComfyUI endpoint (default: `http://host.docker.internal:8188`)
+- `RUNS_DIR` - Storage directory (default: `/app/adgen/runs`)
+- `GRAPH_PATH` - ComfyUI workflow file (default: `/app/adgen/graphs/qwen.json`)
+
+#### Testing & Operations
+- `COMFY_MODE=test` - Enable test mode (mocks ComfyUI for CI)
+- `RUN_RETENTION_HOURS=24` - Auto-cleanup old runs (default: 24h)
+- `POLL_TIMEOUT=180` - Max wait for ComfyUI job (default: 180s)
+
+### Deployment
+
+#### Local Development
+```bash
+# Start with Docker Compose
+docker compose -f adgen/docker-compose.dev.yml up --build
+
+# Test the API
+bash scripts/smoke.sh
+```
+
+#### Production (Google Cloud Run)
+```bash
+export PROJECT_ID=your-gcp-project
+export COMFY_ENDPOINT=https://your-comfy-api.com:8188
+bash scripts/deploy.sh
+```
+
+#### Staging (Test Mode)
+```bash
+export PROJECT_ID=your-gcp-project
+bash scripts/deploy-staging.sh
+```
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**"Graph file not found"**
+- Ensure `adgen/api/adgen/graphs/qwen.json` exists
+- Check `GRAPH_PATH` environment variable
+
+**"ComfyUI connection refused"**
+- Verify ComfyUI is running on correct port
+- Test: `curl http://localhost:8188/` should return 200
+- For Docker: use `host.docker.internal:8188`
+
+**"No files generated"**
+- Check ComfyUI workflow has SaveImage nodes
+- Verify `filename_prefix` is being set correctly
+- Look at container logs: `docker logs adgen-api`
+
+**CI tests failing**
+- CI runs in test mode (no real ComfyUI needed)
+- Check GitHub Actions logs for specific errors
+- Verify Docker builds succeed locally
+
+### Debug Commands
+```bash
+# Check container health
+docker exec -it adgen-api curl localhost:8000/health/detailed
+
+# Inspect run directory
+docker exec -it adgen-api ls -la /app/adgen/runs/
+
+# View logs
+docker logs -f adgen-api
+
+# Test ComfyUI connectivity from container
+docker exec -it adgen-api python -c "
+import httpx;
+print(httpx.get('http://host.docker.internal:8188/').status_code)
+"
+```
