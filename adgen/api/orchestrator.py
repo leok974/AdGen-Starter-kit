@@ -1,7 +1,19 @@
 # api/orchestrator.py
+import uuid
 from typing import Dict, List
 from pathlib import Path
-from .settings import settings
+from settings import settings
+
+
+def _coerce_run_id(v): # Accept run record dicts or plain strings; always return a string id
+    if isinstance(v, dict):
+        v = v.get("run_id") or v.get("id") or (v.get("detail", {}) if isinstance(v.get("detail"), dict) else {})
+    if isinstance(v, dict):
+        v = v.get("run_id")
+    if not v:
+        v = uuid.uuid4().hex[:12]
+    return str(v)
+
 
 # Expected external functions the API calls:
 # - create_run() -> str
@@ -20,7 +32,9 @@ def create_run() -> str:
     return run_id
 
 
-def kickoff_generation(run_id: str, payload: Dict) -> Dict:
+def kickoff_generation(run_id: str, payload: Dict | None = None) -> Dict:
+    run_id = _coerce_run_id(run_id)
+    payload = payload or {}
     print(f"[orchestrator] kickoff_generation run_id={run_id}")
     print(f"[orchestrator] mode={settings.COMFY_MODE} api={settings.COMFY_API}")
     print(f"[orchestrator] payload={payload}")
@@ -31,6 +45,7 @@ def kickoff_generation(run_id: str, payload: Dict) -> Dict:
 
 
 def list_run_files(run_id: str) -> List[str]:
+    run_id = _coerce_run_id(run_id)
     folder = settings.RUNS_DIR / run_id
     files = [str(p) for p in folder.glob("*") if p.is_file()]
     print(f"[orchestrator] list_run_files {run_id} -> {len(files)} files")
@@ -38,6 +53,7 @@ def list_run_files(run_id: str) -> List[str]:
 
 
 def finalize_run(run_id: str) -> Path:
+    run_id = _coerce_run_id(run_id)
     import shutil
 
     folder = settings.RUNS_DIR / run_id
