@@ -179,3 +179,54 @@ Automatic file organization with timestamps
 Health checks before starting
 
 Progress reporting throughout
+
+---
+
+## 📦 Batch Processing
+
+For generating multiple ads in one run, we provide a PowerShell script:
+
+### `Generate-AdGenContent-Batch.ps1`
+
+This script processes multiple prompts from either a **CSV** or a **TXT** file.
+
+### Features
+- Reads prompts from CSV (`prompt`, `negative_prompt`, `seed`, `name`) or TXT (one prompt per line).
+- Health checks AdGen API + ComfyUI before starting.
+- Sequential or concurrent processing modes.
+- Monitors ComfyUI queue to detect when jobs finish.
+- Finalizes and downloads results for each job.
+- Extracts ZIPs automatically.
+- Provides a detailed summary (success/failure counts, total images, total size).
+
+### Usage Examples
+
+```powershell
+# Sequential (default, recommended)
+& "adgen\scripts\Generate-AdGenContent-Batch.ps1" -InputFile "prompts.csv" -OutputDir "batch_ads" -DelayBetweenJobs 30
+
+# Concurrent mode (all jobs start together)
+& "adgen\scripts\Generate-AdGenContent-Batch.ps1" -InputFile "prompts.csv" -OutputDir "batch_ads" -ConcurrentMode
+
+# Custom timeout + delay
+& "adgen\scripts\Generate-AdGenContent-Batch.ps1" -InputFile "prompts.txt" -OutputDir "my_batch" -MaxWaitMinutes 15 -DelayBetweenJobs 60
+```
+Input Formats
+CSV (prompts.csv):
+
+```csv
+name,prompt,negative_prompt,seed
+luxury_watch,"Elegant luxury watch advertisement, dramatic lighting, black background",cluttered,42
+sports_car,"High-performance sports car ad, dynamic angle, sunset backdrop",blurry,123
+coffee_shop,"Cozy coffee shop poster, warm lighting, rustic atmosphere",artificial,456
+tech_gadget,"Sleek smartphone advertisement, minimalist design, gradient background","low quality, plastic",789
+```
+TXT (prompts.txt):
+
+```csharp
+Elegant luxury watch advertisement with dramatic lighting
+High-performance sports car ad with dynamic sunset
+Cozy coffee shop poster with warm atmosphere
+Sleek smartphone advertisement, minimalist design
+Premium headphones ad with modern aesthetic
+```

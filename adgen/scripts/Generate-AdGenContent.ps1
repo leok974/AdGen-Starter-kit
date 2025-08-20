@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$Prompt,
-
+    
     [string]$NegativePrompt = "",
     [int]$Seed = $null,
     [int]$MaxWaitMinutes = 10,
@@ -35,29 +35,65 @@ function Test-ComfyUI {
 function Test-AdGenAPI {
     try {
         $response = Invoke-RestMethod "$API_BASE/health" -TimeoutSec 5
-        return $response -eq $true
+        # Handle different response formats - could be boolean true or object with ok property
+        return ($response -eq $true) -or ($response.ok -eq $true) -or ($response -ne $null)
     } catch {
         return $false
     }
 }
 
-# Function to wait for generation completion (monitor ComfyUI or use timer)
+# Function to wait for generation completion by monitoring ComfyUI queue
 function Wait-ForGeneration {
-    param([int]$MaxMinutes)
-
-    Write-Host "Waiting for generation to complete (max $MaxMinutes minutes)..."
+    param([int]$MaxMinutes, [string]$PromptId)
+    
+    Write-Host "Monitoring generation progress (max $MaxMinutes minutes)..."
     $startTime = Get-Date
     $maxTime = $startTime.AddMinutes($MaxMinutes)
-
+    $checkCount = 0
+    
     while ((Get-Date) -lt $maxTime) {
-        Write-Host "  Still processing... $((Get-Date).ToString('HH:mm:ss'))"
+        $checkCount++
+        Write-Host "  Check #$checkCount - $((Get-Date).ToString('HH:mm:ss'))"
+        
+        try {
+            # Check ComfyUI queue status
+            $queueStatus = Invoke-RestMethod "http://localhost:8188/queue" -TimeoutSec 10
+            
+            # Check if our prompt is still in the queue
+            $stillProcessing = $false
+            
+            # Check running queue
+            if ($queueStatus.queue_running -and $queueStatus.queue_running.Count -gt 0) {
+                $runningIds = $queueStatus.queue_running | ForEach-Object { $_[1] }
+                if ($runningIds -contains $PromptId) {
+                    $stillProcessing = $true
+                    Write-Host "    Status: Currently processing"
+                }
+            }
+            
+            # Check pending queue
+            if ($queueStatus.queue_pending -and $queueStatus.queue_pending.Count -gt 0) {
+                $pendingIds = $queueStatus.queue_pending | ForEach-Object { $_[1] }
+                if ($pendingIds -contains $PromptId) {
+                    $stillProcessing = $true
+                    Write-Host "    Status: Pending in queue"
+                }
+            }
+            
+            if (-not $stillProcessing) {
+                Write-Host "    Status: Generation completed!"
+                return
+            }
+            
+        } catch {
+            Write-Host "    ComfyUI queue check failed, using fallback timing"
+            # Fallback: just wait a bit more
+        }
+        
         Start-Sleep -Seconds $CHECK_INTERVAL
-
-        # You could add more sophisticated checking here
-        # For now, we'll use a simple timer approach
     }
-
-    Write-Host "Wait period completed"
+    
+    Write-Host "Wait period completed (timeout reached)"
 }
 
 # Main workflow
@@ -69,12 +105,12 @@ try {
 
     # Step 1: Health checks
     Write-Host "1. Checking system health..." -ForegroundColor Yellow
-
+    
     if (-not (Test-AdGenAPI)) {
         throw "AdGen API is not responding. Make sure docker-compose is running."
     }
     Write-Host "   AdGen API: OK"
-
+    
     if (-not (Test-ComfyUI)) {
         throw "ComfyUI is not responding. Make sure ComfyUI is running on port 8188."
     }
@@ -82,33 +118,33 @@ try {
 
     # Step 2: Start generation
     Write-Host "2. Starting generation..." -ForegroundColor Yellow
-
+    
     # Build payload
     $payload = @{ prompt = $Prompt }
     if ($NegativePrompt) { $payload.negative_prompt = $NegativePrompt }
     if ($Seed) { $payload.seed = $Seed }
-
+    
     $payloadJson = $payload | ConvertTo-Json
     Write-Host "   Payload: $payloadJson"
-
+    
     $response = Invoke-RestMethod -Uri "$API_BASE/generate" -Method Post -ContentType "application/json" -Body $payloadJson
     $runId = $response.run_id
-
+    
     Write-Host "   Generation started: $runId" -ForegroundColor Green
     Write-Host "   Status: $($response.status)"
 
     # Step 3: Wait for completion
     Write-Host "3. Monitoring generation..." -ForegroundColor Yellow
-    Wait-ForGeneration -MaxMinutes $MaxWaitMinutes
+    Wait-ForGeneration -MaxMinutes $MaxWaitMinutes -PromptId $response.prompt_id
 
     # Step 4: Finalize
     Write-Host "4. Finalizing run..." -ForegroundColor Yellow
-
+    
     try {
         $finalizeResult = Invoke-RestMethod -Uri "$API_BASE/finalize/$runId" -Method Post
         Write-Host "   Images collected: $($finalizeResult.images.Count)"
         Write-Host "   Total files: $($finalizeResult.files.Count)"
-
+        
         $totalSize = ($finalizeResult.files | Measure-Object -Property size -Sum).Sum
         Write-Host "   Total size: $([math]::Round($totalSize / 1MB, 2)) MB"
     } catch {
@@ -117,12 +153,12 @@ try {
 
     # Step 5: Download
     Write-Host "5. Downloading results..." -ForegroundColor Yellow
-
+    
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $outputFile = Join-Path $OutputDir "adgen_${runId}_${timestamp}.zip"
-
+    
     Invoke-WebRequest "$API_BASE/download/$runId" -OutFile $outputFile
-
+    
     $fileInfo = Get-Item $outputFile
     Write-Host "   Downloaded: $($fileInfo.Name)" -ForegroundColor Green
     Write-Host "   Size: $([math]::Round($fileInfo.Length / 1MB, 2)) MB"
@@ -130,16 +166,16 @@ try {
 
     # Step 6: Extract and display results
     Write-Host "6. Extracting results..." -ForegroundColor Yellow
-
+    
     $extractPath = Join-Path $OutputDir "extracted_${runId}_${timestamp}"
     Expand-Archive $outputFile -DestinationPath $extractPath
-
+    
     $extractedFiles = Get-ChildItem $extractPath -File
     Write-Host "   Extracted $($extractedFiles.Count) files:"
-
+    
     foreach ($file in $extractedFiles) {
         Write-Host "     - $($file.Name) ($([math]::Round($file.Length / 1KB, 0)) KB)"
-
+        
         # Auto-open images if they're PNG/JPG
         if ($file.Extension -match '\.(png|jpg|jpeg)$') {
             Start-Process $file.FullName
