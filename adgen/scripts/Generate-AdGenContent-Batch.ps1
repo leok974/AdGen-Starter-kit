@@ -201,7 +201,7 @@ function Complete-Job {
             zip_file = $outputFile
             extracted_path = $extractPath
             size_mb = [math]::Round($fileInfo.Length / 1MB, 2)
-            images_count = if ($finalizeResult.images) { $finalizeResult.images.Count } else { 0 }
+            images_count = $finalizeResult.images.Count
         }
 
     } catch {
@@ -284,7 +284,7 @@ try {
         }
     }
 
-    # Summary - FIXED SECTION
+    # Summary
     Write-Host ""
     Write-Host "=== BATCH COMPLETE ===" -ForegroundColor Green
     $successful = ($results | Where-Object { $_.success }).Count
@@ -295,47 +295,10 @@ try {
     Write-Host "Failed: $failed"
 
     if ($successful -gt 0) {
-        try {
-            # Safe calculation of totals with error handling
-            $successfulResults = $results | Where-Object { $_.success }
-            
-            # Calculate total size with proper null checking
-            $totalSize = 0
-            $totalImages = 0
-            
-            foreach ($result in $successfulResults) {
-                if ($result.size_mb -and $result.size_mb -is [System.Double]) {
-                    $totalSize += $result.size_mb
-                }
-                if ($result.images_count -and $result.images_count -is [System.Int32]) {
-                    $totalImages += $result.images_count
-                }
-            }
-            
-            # Alternative: Calculate from actual files if properties are missing
-            if ($totalSize -eq 0) {
-                $zipFiles = Get-ChildItem -Path $OutputDir -Filter "*.zip" -ErrorAction SilentlyContinue
-                if ($zipFiles) {
-                    $totalSize = [math]::Round(($zipFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
-                }
-            }
-            
-            # If we still don't have image counts, estimate based on typical output
-            if ($totalImages -eq 0) {
-                $totalImages = $successful * 4  # Estimate 4 images per successful prompt
-                Write-Host "Total size: $([math]::Round($totalSize, 2)) MB"
-                Write-Host "Total images: $totalImages (estimated)"
-            } else {
-                Write-Host "Total size: $([math]::Round($totalSize, 2)) MB"
-                Write-Host "Total images: $totalImages"
-            }
-            
-        } catch {
-            Write-Warning "Could not calculate summary statistics: $($_.Exception.Message)"
-            Write-Host "Total size: Unable to calculate"
-            Write-Host "Total images: Unable to calculate"
-        }
-        
+        $totalSize = ($results | Where-Object { $_.success } | Measure-Object -Property size_mb -Sum).Sum
+        $totalImages = ($results | Where-Object { $_.success } | Measure-Object -Property images_count -Sum).Sum
+        Write-Host "Total size: $([math]::Round($totalSize, 2)) MB"
+        Write-Host "Total images: $totalImages"
         Write-Host "Results saved to: $OutputDir"
     }
 
