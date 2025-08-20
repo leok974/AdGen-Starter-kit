@@ -1,44 +1,39 @@
-# adgen/docker-compose.dev.yml
 name: adgen
 
 services:
   api:
     container_name: adgen-api
     build:
-      context: ./api
+      context: /app/adgen/api          # <— build only API dir
       dockerfile: Dockerfile
     environment:
-      - PORT=8000
-      - COMFY_MODE=api
-      - COMFY_API=http://host.docker.internal:8188/
-      - COMFY_MODE=${COMFY_MODE:-production}
+      - PORT=8080                   # <— container listens on 8080
       - LOG_LEVEL=info
+      - COMFY_API=http://host.docker.internal:8188/
+      - COMFY_MODE=api
     ports:
-      - "8000:8000"
+      - "8000:8080"                 # <— host:container (browse http://localhost:8000)
     volumes:
-      - ./api:/app
-      - ./api/adgen/runs:/app/adgen/runs
-    command: ["python", "server.py"]
+      - /app/adgen/api:/app            # live reload code
+      - /app/adgen/api/adgen/runs:/app/adgen/runs
+    command: ["python", "server.py"]  # starts uvicorn on $PORT
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0) if urllib.request.urlopen('http://localhost:8080/health').status==200 else sys.exit(1)"]
       interval: 30s
       timeout: 3s
       retries: 10
 
-    # Live-reload via Docker Compose Watch
     develop:
       watch:
-        # Restart container when source files change
         - action: restart
-          path: ./api
+          path: ./adgen/api
           ignore:
             - adgen/runs/**
             - .venv/**
             - __pycache__/**
             - "*.pyc"
-        # Rebuild image if deps change
         - action: rebuild
-          path: ./api/requirements.txt
+          path: ./adgen/api/requirements.txt
