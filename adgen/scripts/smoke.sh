@@ -24,11 +24,9 @@ extract_run_id() {
     local response="$1"
     local run_id
 
-    # Try multiple extraction methods
     run_id=$(echo "$response" | jq -r '.run_id // .detail.run_id // .run_id.run_id // empty' 2>/dev/null)
 
     if [[ -z "$run_id" || "$run_id" == "null" ]]; then
-        # Fallback: find any run_id in the structure
         run_id=$(echo "$response" | jq -r '..|.run_id? // empty' 2>/dev/null | head -n1)
     fi
 
@@ -70,3 +68,4 @@ fi
 
 echo "📊 Files found: $file_count"
 echo "✅ Smoke test PASSED"
+exit 0

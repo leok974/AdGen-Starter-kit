@@ -11,6 +11,7 @@ services:
       - PORT=8000
       - COMFY_MODE=api
       - COMFY_API=http://host.docker.internal:8188/
+      - COMFY_MODE=${COMFY_MODE:-production}
       - LOG_LEVEL=info
     ports:
       - "8000:8000"
