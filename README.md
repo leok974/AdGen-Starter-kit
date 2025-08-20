@@ -120,3 +120,62 @@ import httpx;
 print(httpx.get('http://host.docker.internal:8188/').status_code)
 "
 ```
+
+---
+
+## 📌 Workflow Guide
+
+We’ve documented the full **AdGen + ComfyUI generation workflow** in a dedicated file:
+
+👉 [WORKFLOW.md](./WORKFLOW.md)
+
+This guide covers:
+- How to start a generation run
+- Monitoring ComfyUI outputs
+- Finalizing runs into packaged ZIPs
+- Downloading results locally
+
+Use this if you want a **step-by-step PowerShell example** to quickly generate and retrieve ad assets.
+
+---
+
+## ⚡ Scripts
+
+We provide a PowerShell script to automate the full AdGen + ComfyUI workflow.
+
+### `Generate-AdGenContent.ps1`
+
+This script handles the complete process:
+
+1. Health checks (AdGen API + ComfyUI)
+2. Start generation (`/generate`)
+3. Wait for ComfyUI to finish
+4. Finalize run (`/finalize/{run_id}`)
+5. Download + extract results (`/download/{run_id}`)
+6. Auto-open images
+7. Optional cleanup (`DELETE /runs/{run_id}`)
+
+### Usage
+
+```powershell
+# Basic usage
+.\Generate-AdGenContent.ps1 -Prompt "Create an advertisement for a luxury watch"
+
+# With more options
+.\Generate-AdGenContent.ps1 -Prompt "Sports car advertisement" -NegativePrompt "blurry, low quality" -Seed 42 -MaxWaitMinutes 15
+
+# Custom output directory
+.\Generate-AdGenContent.ps1 -Prompt "Beverage advertisement" -OutputDir ".\adgen_out"
+```
+
+Key Features
+
+Error handling and informative messages
+
+Configurable wait times and output directories
+
+Automatic file organization with timestamps
+
+Health checks before starting
+
+Progress reporting throughout
