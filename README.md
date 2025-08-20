@@ -120,3 +120,19 @@ import httpx;
 print(httpx.get('http://host.docker.internal:8188/').status_code)
 "
 ```
+
+---
+
+## 📌 Workflow Guide
+
+We’ve documented the full **AdGen + ComfyUI generation workflow** in a dedicated file:
+
+👉 [WORKFLOW.md](./WORKFLOW.md)
+
+This guide covers:
+- How to start a generation run
+- Monitoring ComfyUI outputs
+- Finalizing runs into packaged ZIPs
+- Downloading results locally
+
+Use this if you want a **step-by-step PowerShell example** to quickly generate and retrieve ad assets.
