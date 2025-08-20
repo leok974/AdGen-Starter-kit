@@ -1,106 +1,46 @@
-name: Docker Publish
-
-on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*.*.*' ]
-
-jobs:
-  build-and-push-ghcr:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      # Lowercase repo for GHCR tags (GHCR requires all-lowercase)
-      - name: Prepare image tags
-        run: |
-          echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
-          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v2'
-        with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
-
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v2'
-
-      - name: Configure Docker for GAR
-        run: gcloud auth configure-docker "${{ secrets.GAR_LOCATION }}-docker.pkg.dev" --quiet
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Build once, push to GHCR + GAR with SHA and latest tags
-      - name: Build & Push (GHCR + GAR)
-        run: |
-          GHCR_SHA="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:${GITHUB_SHA}"
-          GHCR_LATEST="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:latest"
-
-          GAR_SHA="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${GITHUB_SHA}"
-          GAR_LATEST="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:latest"
-
-          echo "GHCR_SHA=$GHCR_SHA"
-          echo "GHCR_LATEST=$GHCR_LATEST"
-          echo "GAR_SHA=$GAR_SHA"
-          echo "GAR_LATEST=$GAR_LATEST"
-
-          # If your Dockerfile is NOT at repo root, add:  -f path/to/Dockerfile  path/to/build/context
-          docker buildx build \
-            --platform linux/amd64 \
-            --push \
-            -f adgen/api/Dockerfile \
-            --tag "$GHCR_SHA" \
-            --tag "$GHCR_LATEST" \
-            --tag "$GAR_SHA" \
-            --tag "$GAR_LATEST" \
-            .
-
-          # Expose for later steps (deploy uses GAR_SHA or GAR_LATEST)
-          echo "GAR_IMAGE_SHA=$GAR_SHA" >> $GITHUB_ENV
-          echo "GAR_IMAGE_LATEST=$GAR_LATEST" >> $GITHUB_ENV
-
-  deploy-to-cloud-run:
-    needs: build-and-push-ghcr
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v2'
-        with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
-
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v2'
-
-      - name: 'Deploy to Cloud Run'
-        id: deploy
-        uses: 'google-github-actions/deploy-cloudrun@v2'
-        with:
-          service: 'adgen-api'
-          image: '${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}'
-          region: 'us-central1'
-          flags: '--allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=80 --port=8080'
-          env_vars: 'ENV=staging'
-
-      - name: Smoke test
-        run: |
-          set -e
-          for i in {1..20}; do
-            echo "Health attempt $i"
-            curl -sf "${{ steps.deploy.outputs.url }}/health" && break || sleep 2
-          done
-          curl -sf "${{ steps.deploy.outputs.url }}/"
+# Replace your "Build & Push (GHCR + GAR)" step with this:
+- name: Build & Push (GHCR + GAR)
+  run: |
+    # Strip any potential newlines from secrets and environment variables
+    GAR_LOCATION_CLEAN=$(echo "${{ secrets.GAR_LOCATION }}" | tr -d '\n\r' | xargs)
+    GCP_PROJECT_ID_CLEAN=$(echo "${{ secrets.GCP_PROJECT_ID }}" | tr -d '\n\r' | xargs)
+    GAR_REPOSITORY_CLEAN=$(echo "${{ secrets.GAR_REPOSITORY }}" | tr -d '\n\r' | xargs)
+    IMAGE_NAME_LC_CLEAN=$(echo "${{ env.IMAGE_NAME_LC }}" | tr -d '\n\r' | xargs)
+    
+    # Build clean tag variables
+    GHCR_SHA="ghcr.io/${IMAGE_NAME_LC_CLEAN}/adgen-api:${GITHUB_SHA}"
+    GHCR_LATEST="ghcr.io/${IMAGE_NAME_LC_CLEAN}/adgen-api:latest"
+    GAR_SHA="${GAR_LOCATION_CLEAN}-docker.pkg.dev/${GCP_PROJECT_ID_CLEAN}/${GAR_REPOSITORY_CLEAN}/adgen-api:${GITHUB_SHA}"
+    GAR_LATEST="${GAR_LOCATION_CLEAN}-docker.pkg.dev/${GCP_PROJECT_ID_CLEAN}/${GAR_REPOSITORY_CLEAN}/adgen-api:latest"
+    
+    echo "GHCR_SHA=$GHCR_SHA"
+    echo "GHCR_LATEST=$GHCR_LATEST" 
+    echo "GAR_SHA=$GAR_SHA"
+    echo "GAR_LATEST=$GAR_LATEST"
+    
+    # Verify tags don't contain newlines
+    if [[ "$GAR_SHA" == *$'\n'* ]] || [[ "$GAR_SHA" == *$'\r'* ]]; then
+      echo "ERROR: GAR_SHA contains newline characters"
+      exit 1
+    fi
+    
+    # Verify Dockerfile exists
+    if [ ! -f "adgen/api/Dockerfile" ]; then
+      echo "Error: Dockerfile not found at adgen/api/Dockerfile"
+      exit 1
+    fi
+    
+    # Build and push
+    docker buildx build \
+      --platform linux/amd64 \
+      --push \
+      -f adgen/api/Dockerfile \
+      --tag "$GHCR_SHA" \
+      --tag "$GHCR_LATEST" \
+      --tag "$GAR_SHA" \
+      --tag "$GAR_LATEST" \
+      adgen/api/
+    
+    # Export for deploy step
+    echo "GAR_IMAGE_SHA=$GAR_SHA" >> $GITHUB_ENV
+    echo "GAR_IMAGE_LATEST=$GAR_LATEST" >> $GITHUB_ENV
