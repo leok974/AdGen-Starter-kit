@@ -11,18 +11,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+      
       - name: Cache pip dependencies
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-py311-${{ hashFiles('adgen/api/requirements.txt') }}
-
+      
       - name: Install app deps
         run: |
           python -m pip install -U pip
@@ -31,7 +31,7 @@ jobs:
           else
             pip install fastapi "uvicorn[standard]" pydantic pydantic-settings starlette httpx
           fi
-
+      
       - name: Install dev deps
         run: |
           if [ -f adgen/requirements-dev.txt ]; then
@@ -39,19 +39,26 @@ jobs:
           else
             pip install ruff black pytest
           fi
-
+      
       - name: Lint & Test
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          if command -v ruff >/dev/null 2>&1; then ruff check .; fi
-          if command -v black >/dev/null 2>&1; then black --check .; fi
-          if command -v pytest >/dev/null 2>&1; then pytest -q; fi
-
+          if command -v ruff >/dev/null 2>&1; then
+            ruff check .
+          fi
+          if command -v black >/dev/null 2>&1; then
+            black --check .
+          fi
+          if command -v pytest >/dev/null 2>&1; then
+            pytest -q
+          fi
+      
       - name: Run API and check endpoints
         run: |
           cd adgen
           uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          
           for i in {1..10}; do
             if curl -f http://localhost:8000/health; then
               echo "Health check passed"
@@ -60,6 +67,7 @@ jobs:
             fi
             sleep 2
           done
+          
           echo "Health check failed"
           kill $(jobs -p) || true
           exit 1
@@ -68,25 +76,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      
+      # Fixed: Use proper syntax for checking secrets
       - name: Docker login (Hub)
-        if: ${{ secrets.DOCKERHUB_USERNAME && secrets.DOCKERHUB_TOKEN }}
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-
+      
       - name: Build API image
         run: docker build --pull -t adgen-api:verify ./adgen/api
-
+      
       - name: Run API container and check endpoints
         run: |
-          docker run -d -p 8000:8000 --name adgen-api adgen-api:verify
+          docker run -d -p 8000:8080 --name adgen-api adgen-api:verify
+          
           for i in {1..10}; do
             if curl -f http://localhost:8000/health; then
               echo "Health check passed"
               docker kill adgen-api || true
+              docker rm adgen-api || true
               exit 0
             fi
             sleep 2
           done
+          
           echo "Health check failed"
+          docker logs adgen-api || true
           docker kill adgen-api || true
+          docker rm adgen-api || true
           exit 1
