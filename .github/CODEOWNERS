@@ -1,4 +1,0 @@
-.github/workflows/docker-publish.yml @leok974
-.github/workflows/ci.yml @leok974
-adgen/docker-compose.dev.yml @leok974
-adgen/scripts/smoke.sh @leok974
