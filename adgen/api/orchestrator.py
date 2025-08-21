@@ -127,10 +127,20 @@ def create_run(payload: Dict | None = None) -> Dict:
     payload = payload or {}
     run_id = payload.get("run_id") or uuid.uuid4().hex[:12]
     meta_path = os.path.join(_run_dir(run_id), "meta.json")
-    with open(meta_path, "wb") as f:
-        f.write(json.dumps({"payload": payload}, indent=2).encode())
+
+    run_data = {
+        "run_id": run_id,
+        "status": "PENDING",
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "inputs": payload,
+        "artifacts": [],
+    }
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(run_data, f, indent=2)
+
     print(f"[orchestrator] create_run -> {run_id}")
-    return {"run_id": run_id, "status": "created", "input": payload}
+    return run_data
 
 def kickoff_generation(run_id: str, payload: Dict | None = None) -> Dict:
     run_id = _coerce_run_id(run_id)
@@ -149,20 +159,33 @@ def kickoff_generation(run_id: str, payload: Dict | None = None) -> Dict:
     with _http() as client:
         prompt_id = _submit_prompt(client, graph, client_id=run_id)
 
-    # Save prompt_id
+    # Update meta.json with run info
     meta_path = os.path.join(_run_dir(run_id), "meta.json")
     try:
-        meta = {}
-        if os.path.exists(meta_path):
-            meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
-        meta.update({"prompt_id": prompt_id, "prompt": prompt, "negative_prompt": negative})
-        with open(meta_path, "wb") as f:
-            f.write(json.dumps(meta, indent=2).encode())
-    except Exception:
-        pass
+        with open(meta_path, "r+", encoding="utf-8") as f:
+            meta = json.load(f)
+            meta["prompt_id"] = prompt_id
+            meta["status"] = "RUNNING"
+            f.seek(0)
+            json.dump(meta, f, indent=2)
+            f.truncate()
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Error updating meta.json for {run_id}: {e}")
+        # Create the file if it doesn't exist or is invalid
+        meta = {
+            "run_id": run_id,
+            "status": "RUNNING",
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "inputs": payload,
+            "prompt_id": prompt_id,
+            "artifacts": [],
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
 
     print(f"[orchestrator] kickoff_generation run_id={run_id} prompt_id={prompt_id}")
-    return {"run_id": run_id, "status": "started", "prompt_id": prompt_id}
+    return {"run_id": run_id, "status": "RUNNING", "prompt_id": prompt_id}
 
 def list_run_files(run_id: str) -> List[Dict]:
     run_id = _coerce_run_id(run_id)
@@ -204,25 +227,108 @@ def finalize_run(run_id: str) -> Dict:
             with open(meta_path, "wb") as f:
                 f.write(json.dumps(meta, indent=2).encode())
 
-        if TEST_MODE:
-            # Create fake image for testing
-            test_image = {"filename": f"{run_id}_test.png", "subfolder": "", "type": "output"}
-            out_path = os.path.join(_run_dir(run_id), test_image["filename"])
-            with open(out_path, "wb") as f:
-                f.write(b"fake_image_data_for_testing")
-            images.append({**test_image, "saved_to": out_path})
-        else:
-            hist = _poll_history(client, prompt_id)
-            for im in _iter_images(hist):
-                params = {"filename": im["filename"], "subfolder": im.get("subfolder",""), "type": im.get("type","output")}
-                r = client.get("/view", params=params)
-                r.raise_for_status()
-                out_path = os.path.join(_run_dir(run_id), im["filename"])
+        try:
+            if TEST_MODE:
+                # Create fake image for testing
+                test_image = {"filename": f"{run_id}_test.png", "subfolder": "", "type": "output", "url": f"/runs/{run_id}/files/{run_id}_test.png"}
+                out_path = os.path.join(_run_dir(run_id), test_image["filename"])
                 with open(out_path, "wb") as f:
-                    f.write(r.content)
-                images.append({**im, "saved_to": out_path})
+                    f.write(b"fake_image_data_for_testing")
+                images.append({**test_image, "saved_to": out_path})
+            else:
+                hist = _poll_history(client, prompt_id)
+                for im in _iter_images(hist):
+                    params = {"filename": im["filename"], "subfolder": im.get("subfolder",""), "type": im.get("type","output")}
+                    r = client.get("/view", params=params)
+                    r.raise_for_status()
+                    out_path = os.path.join(_run_dir(run_id), im["filename"])
+                    with open(out_path, "wb") as f:
+                        f.write(r.content)
+                    images.append({**im, "saved_to": out_path, "url": f"/runs/{run_id}/files/{im['filename']}"})
 
-    files = list_run_files(run_id)
+            status = "COMPLETED"
+        except Exception as e:
+            print(f"Error during finalization of {run_id}: {e}")
+            status = "FAILED"
+
+    # Update meta.json with final status
+    with open(meta_path, "r+", encoding="utf-8") as f:
+        meta = json.load(f)
+        meta["status"] = status
+        meta["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        meta["artifacts"] = images
+        f.seek(0)
+        json.dump(meta, f, indent=2)
+        f.truncate()
+
     zip_path = _zip_run(run_id)
     print(f"[orchestrator] finalize_run -> zip={zip_path}")
-    return {"run_id": run_id, "images": images, "files": files, "zip": zip_path}
+    return meta
+
+def list_runs() -> List[Dict]:
+    """Lists all runs, reading metadata from each run's directory."""
+    runs = []
+    for p in Path(RUNS_DIR).iterdir():
+        if p.is_dir():
+            meta_path = p / "meta.json"
+            if meta_path.exists():
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                        runs.append({
+                            "run_id": meta.get("run_id"),
+                            "prompt": meta.get("inputs", {}).get("prompt"),
+                            "status": meta.get("status"),
+                            "created_at": meta.get("created_at"),
+                            "finished_at": meta.get("finished_at"),
+                            "duration": (
+                                int(time.mktime(time.strptime(meta["finished_at"], "%Y-%m-%dT%H:%M:%S%z"))) -
+                                int(time.mktime(time.strptime(meta["created_at"], "%Y-%m-%dT%H:%M:%S%z")))
+                            ) if meta.get("finished_at") else None,
+                        })
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"Skipping corrupt meta.json for run {p.name}: {e}")
+    return sorted(runs, key=lambda r: r["created_at"], reverse=True)
+
+def get_run_detail(run_id: str) -> Dict | None:
+    """Gets detailed information for a single run."""
+    run_id = _coerce_run_id(run_id)
+    meta_path = Path(RUNS_DIR) / run_id / "meta.json"
+    if meta_path.exists():
+        with open(meta_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def cancel_run(run_id: str) -> Dict:
+    """Cancels a run by updating its status."""
+    run_id = _coerce_run_id(run_id)
+    meta_path = Path(RUNS_DIR) / run_id / "meta.json"
+    if meta_path.exists():
+        with open(meta_path, "r+", encoding="utf-8") as f:
+            meta = json.load(f)
+            if meta["status"] in ["PENDING", "RUNNING"]:
+                meta["status"] = "CANCELLED"
+                meta["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                f.seek(0)
+                json.dump(meta, f, indent=2)
+                f.truncate()
+                print(f"[orchestrator] Cancelled run {run_id}")
+                return meta
+    raise FileNotFoundError(f"Run {run_id} not found.")
+
+def _update_run_status(run_id: str, status: str, error: str | None = None) -> None:
+    """Updates the status of a run in its meta.json file."""
+    run_id = _coerce_run_id(run_id)
+    meta_path = Path(RUNS_DIR) / run_id / "meta.json"
+    if meta_path.exists():
+        with open(meta_path, "r+", encoding="utf-8") as f:
+            meta = json.load(f)
+            meta["status"] = status
+            if error:
+                meta["error"] = error
+            if status in ["FAILED", "COMPLETED", "CANCELLED"]:
+                meta["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            f.seek(0)
+            json.dump(meta, f, indent=2)
+            f.truncate()
+            print(f"[orchestrator] Updated run {run_id} status to {status}")

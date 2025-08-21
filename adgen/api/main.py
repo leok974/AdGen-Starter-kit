@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from orchestrator import create_run, kickoff_generation, list_run_files, finalize_run
+from orchestrator import create_run, kickoff_generation, list_runs, get_run_detail, cancel_run, finalize_run, _update_run_status
 
 app = FastAPI(title="AdGen API", version="0.1.0")
 
@@ -136,22 +136,59 @@ def detailed_health():
 @app.post("/generate")
 def generate(body: GenerateBody):
     try:
-        run_info = create_run(payload=body.model_dump())
-        run_id = run_info["run_id"]
-        result = kickoff_generation(run_id, payload=body.model_dump())
-        return result
+        # Always create run first
+        result = create_run(body.dict())
+        run_id = result["run_id"]
+
+        try:
+            # Attempt to start generation
+            generation_result = kickoff_generation(run_id, body.dict())
+            return generation_result
+        except Exception as e:
+            # Mark run as failed but still return run_id
+            _update_run_status(run_id, "FAILED", str(e))
+            return {
+                "run_id": run_id,
+                "status": "FAILED",
+                "error": str(e)
+            }
     except Exception as e:
-        print(f"[/generate] ERROR: {repr(e)}")
+        # Only return 500 if we can't even create the run
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/runs/{run_id}/files")
-def get_run_files(run_id: str):
+@app.get("/runs")
+async def list_runs_endpoint():
+    """Return list of all runs with basic info"""
     try:
-        files = list_run_files(run_id)
-        return {"run_id": run_id, "files": files}
+        return list_runs()
     except Exception as e:
-        print(f"[/runs/{run_id}/files] ERROR: {repr(e)}")
+        print(f"[/runs] ERROR: {repr(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/runs/{run_id}")
+async def get_run_detail_endpoint(run_id: str):
+    """Return detailed run info including artifacts"""
+    try:
+        detail = get_run_detail(run_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return detail
+    except Exception as e:
+        print(f"[/runs/{run_id}] ERROR: {repr(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/runs/{run_id}/cancel")
+async def cancel_run_endpoint(run_id: str):
+    """Cancel a running generation"""
+    try:
+        return cancel_run(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Run not found")
+    except Exception as e:
+        print(f"[/runs/{run_id}/cancel] ERROR: {repr(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
