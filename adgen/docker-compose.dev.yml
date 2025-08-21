@@ -4,19 +4,22 @@ services:
   api:
     container_name: adgen-api
     build:
-      context: /app/adgen/api          # <— build only API dir
+      context: ./api                   # ✅ Fixed: Use relative path
       dockerfile: Dockerfile
     environment:
-      - PORT=8080                   # <— container listens on 8080
+      - PORT=8080                      # container listens on 8080
       - LOG_LEVEL=info
       - COMFY_API=http://host.docker.internal:8188/
-      - COMFY_MODE=api
+      - COMFY_MODE=${COMFY_MODE:-api}   # Use environment variable with fallback
+      - TEST_MODE=${TEST_MODE:-false}   # Support test mode
     ports:
-      - "8000:8080"                 # <— host:container (browse http://localhost:8000)
+      - "8000:8080"                    # host:container (browse http://localhost:8000)
     volumes:
-      - /app/adgen/api:/app            # live reload code
-      - /app/adgen/api/adgen/runs:/app/adgen/runs
-    command: ["python", "server.py"]  # starts uvicorn on $PORT
+      # ✅ Fixed: Use relative paths for development
+      - ./api:/app                     # live reload code
+      - ./api/adgen/runs:/app/adgen/runs
+      # Create runs directory if it doesn't exist
+    command: ["python", "server.py"]   # starts uvicorn on $PORT
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -29,11 +32,11 @@ services:
     develop:
       watch:
         - action: restart
-          path: ./adgen/api
+          path: ./api                  # ✅ Fixed: Use relative path
           ignore:
             - adgen/runs/**
             - .venv/**
             - __pycache__/**
             - "*.pyc"
         - action: rebuild
-          path: ./adgen/api/requirements.txt
+          path: ./api/requirements.txt  # ✅ Fixed: Use relative path
