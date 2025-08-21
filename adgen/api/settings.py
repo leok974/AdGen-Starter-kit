@@ -34,8 +34,8 @@ class AppSettings(BaseSettings):
     @classmethod
     def _mode_ok(cls, v: str) -> str:
         v = v.lower().strip()
-        if v not in {"api", "hotfolder"}:
-            raise ValueError("COMFY_MODE must be 'api' or 'hotfolder'")
+        if v not in {"api", "hotfolder", "test"}:
+            raise ValueError("COMFY_MODE must be 'api', 'hotfolder', or 'test'")
         return v
 
     @field_validator("RUNS_DIR")
