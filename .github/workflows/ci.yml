@@ -43,10 +43,10 @@ jobs:
           # Wait up to 60 seconds for service to be healthy
           for i in {1..30}; do
             if curl -sf http://localhost:8000/health; then
-              echo "✅ Service is healthy"
+              echo "Service is healthy"
               break
             fi
-            echo "⏳ Waiting for service... ($i/30)"
+            echo "Waiting for service... ($i/30)"
             sleep 2
           done
 
@@ -74,7 +74,7 @@ jobs:
           # Verify it's gone (should return empty files list)
           files=$(curl -sf "http://localhost:8000/runs/$run_id/files")
           if [[ $(echo "$files" | jq '.files | length') != "0" ]]; then
-            echo "⚠️ Delete test inconclusive (files may not have been created yet)"
+            echo "Delete test inconclusive (files may not have been created yet)"
           fi
 
       - name: Show logs on failure
