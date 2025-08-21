@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*.*.*' ]
+  workflow_dispatch:
 
 jobs:
   build-and-push-ghcr:
@@ -14,8 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Lowercase repo for GHCR tags (GHCR requires all-lowercase)
-      - name: Prepare image tags
+      - name: Prepare image tags (lowercase owner/repo)
         run: |
           echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
@@ -27,13 +27,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v2'
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v2'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker for GAR
         run: gcloud auth configure-docker "${{ secrets.GAR_LOCATION }}-docker.pkg.dev" --quiet
@@ -44,53 +44,77 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build once, push to GHCR + GAR with SHA and latest tags
       - name: Build & Push (GHCR + GAR)
+        env:
+          GAR_LOCATION: ${{ secrets.GAR_LOCATION }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GAR_REPOSITORY: ${{ secrets.GAR_REPOSITORY }}
         run: |
-          GHCR_SHA="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:${GITHUB_SHA}"
-          GHCR_LATEST="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:latest"
-          GAR_SHA="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${GITHUB_SHA}"
-          GAR_LATEST="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:latest"
+          set -euo pipefail
+
+          # Strip any hidden newlines/spaces from secrets
+          strip(){ printf '%s' "$1" | tr -d '\r\n' | xargs; }
+          GAR_LOCATION="$(strip "$GAR_LOCATION")"
+          GCP_PROJECT_ID="$(strip "$GCP_PROJECT_ID")"
+          GAR_REPOSITORY="$(strip "$GAR_REPOSITORY")"
+
+          GHCR_SHA="ghcr.io/${IMAGE_NAME_LC}/adgen-api:${GITHUB_SHA}"
+          GHCR_LATEST="ghcr.io/${IMAGE_NAME_LC}/adgen-api:latest"
+
+          GAR_BASE="${GAR_LOCATION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/adgen-api"
+          GAR_SHA="${GAR_BASE}:${GITHUB_SHA}"
+          GAR_LATEST="${GAR_BASE}:latest"
+
           echo "GHCR_SHA=$GHCR_SHA"
           echo "GHCR_LATEST=$GHCR_LATEST"
           echo "GAR_SHA=$GAR_SHA"
           echo "GAR_LATEST=$GAR_LATEST"
-          
+
+          # Auth check + docker login to GAR
+          gcloud auth print-access-token >/dev/null
+          docker login -u oauth2accesstoken -p "$(gcloud auth print-access-token)" \
+            "${GAR_LOCATION}-docker.pkg.dev"
+
+          # Build from API folder; Dockerfile path is inside it
           docker buildx build \
             --platform linux/amd64 \
             --push \
             -f adgen/api/Dockerfile \
-            --tag "$GHCR_SHA" \
-            --tag "$GHCR_LATEST" \
-            --tag "$GAR_SHA" \
-            --tag "$GAR_LATEST" \
+            -t "$GHCR_SHA" \
+            -t "$GHCR_LATEST" \
+            -t "$GAR_SHA" \
+            -t "$GAR_LATEST" \
             adgen/api
-          
-          # Expose for later steps (deploy uses GAR_SHA or GAR_LATEST)
-          echo "GAR_IMAGE_SHA=$GAR_SHA" >> $GITHUB_ENV
-          echo "GAR_IMAGE_LATEST=$GAR_LATEST" >> $GITHUB_ENV
+
+          echo "GAR_IMAGE_SHA=$GAR_SHA" >> "$GITHUB_ENV"
+          echo "GAR_IMAGE_LATEST=$GAR_LATEST" >> "$GITHUB_ENV"
 
   deploy-to-cloud-run:
     needs: build-and-push-ghcr
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v2'
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v2'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: 'Deploy to Cloud Run'
+      - name: Deploy to Cloud Run
         id: deploy
-        uses: 'google-github-actions/deploy-cloudrun@v2'
+        uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: 'adgen-api'
-          image: '${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}'
-          region: 'us-central1'
-          flags: '--allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=80 --port=8080'
+          service: adgen-api
+          image: ${{ env.GAR_IMAGE_SHA }}
+          region: ${{ secrets.CLOUD_RUN_REGION || secrets.GAR_LOCATION }}
+          flags: >-
+            --allow-unauthenticated
+            --min-instances=0
+            --max-instances=3
+            --concurrency=80
+            --port=8080
           env_vars: 'ENV=staging'
 
       - name: Smoke test
