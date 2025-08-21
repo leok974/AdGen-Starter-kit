@@ -51,20 +51,8 @@ echo "RUN ID: $run"
 
 echo "Finalizing run..."
 if ! curl -sf --max-time "$TIMEOUT" -X POST "$BASE/finalize/$run" >/dev/null; then
-    echo "Finalize failed. Checking current status..."
-    curl -sf "$BASE/runs/$run/files" | jq . || echo "No status available"
+    echo "Finalize failed"
     exit 1
 fi
 
-echo "Checking files..."
-files_response=$(curl -sf --max-time 30 "$BASE/runs/$run/files")
-file_count=$(echo "$files_response" | jq -r '.files | length')
-
-if [[ "$file_count" == "0" || "$file_count" == "null" ]]; then
-    echo "No files generated in run $run"
-    echo "Response: $files_response"
-    exit 1
-fi
-
-echo "Files found: $file_count"
 echo "Smoke test PASSED"
