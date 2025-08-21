@@ -55,6 +55,7 @@ jobs:
 
       - name: Run smoke test
         run: |
+          cd adgen
           bash scripts/smoke.sh http://localhost:8000 "CI test prompt"
         env:
           TIMEOUT: 60
