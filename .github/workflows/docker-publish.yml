@@ -49,13 +49,16 @@ jobs:
         run: |
           GHCR_SHA="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:${GITHUB_SHA}"
           GHCR_LATEST="ghcr.io/${{ env.IMAGE_NAME_LC }}/adgen-api:latest"
+
           GAR_SHA="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${GITHUB_SHA}"
           GAR_LATEST="${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:latest"
+
           echo "GHCR_SHA=$GHCR_SHA"
           echo "GHCR_LATEST=$GHCR_LATEST"
           echo "GAR_SHA=$GAR_SHA"
           echo "GAR_LATEST=$GAR_LATEST"
-          
+
+          # If your Dockerfile is NOT at repo root, add:  -f path/to/Dockerfile  path/to/build/context
           docker buildx build \
             --platform linux/amd64 \
             --push \
@@ -64,8 +67,8 @@ jobs:
             --tag "$GHCR_LATEST" \
             --tag "$GAR_SHA" \
             --tag "$GAR_LATEST" \
-            adgen/api
-          
+            .
+
           # Expose for later steps (deploy uses GAR_SHA or GAR_LATEST)
           echo "GAR_IMAGE_SHA=$GAR_SHA" >> $GITHUB_ENV
           echo "GAR_IMAGE_LATEST=$GAR_LATEST" >> $GITHUB_ENV
@@ -89,9 +92,9 @@ jobs:
         with:
           service: 'adgen-api'
           image: '${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}'
-          region: '${{ secrets.GAR_LOCATION }}'
+          region: 'us-central1'
           flags: '--allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=80 --port=8080'
-          env_vars: 'ENV=staging,COMFY_MODE=test'
+          env_vars: 'ENV=staging'
 
       - name: Smoke test
         run: |
