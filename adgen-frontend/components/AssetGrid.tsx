@@ -10,9 +10,10 @@ interface Artifact {
 
 interface AssetGridProps {
   artifacts: Artifact[];
+  runId: string;
 }
 
-export default function AssetGrid({ artifacts }: AssetGridProps) {
+export default function AssetGrid({ artifacts, runId }: AssetGridProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const downloadAsset = (url: string, filename?: string) => {
@@ -24,11 +25,30 @@ export default function AssetGrid({ artifacts }: AssetGridProps) {
     document.body.removeChild(link);
   };
 
+  const downloadAllAssets = () => {
+    const link = document.createElement('a');
+    link.href = `${process.env.NEXT_PUBLIC_API_URL}/download/${runId}`;
+    link.download = `run_${runId}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const isImage = (type: string) => type.startsWith('image/') || type === 'image';
   const isVideo = (type: string) => type.startsWith('video/') || type === 'video';
 
   return (
     <>
+      <div className="mb-4 flex justify-end">
+        <button
+          onClick={downloadAllAssets}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+        >
+          <Download className="w-4 h-4" />
+          <span>Download All</span>
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {artifacts.map((artifact, index) => (
           <div key={index} className="border rounded-lg overflow-hidden">
@@ -86,7 +106,7 @@ export default function AssetGrid({ artifacts }: AssetGridProps) {
 
       {/* Image Modal */}
       {selectedImage && (
-        <div
+        <div 
           className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
           onClick={() => setSelectedImage(null)}
         >

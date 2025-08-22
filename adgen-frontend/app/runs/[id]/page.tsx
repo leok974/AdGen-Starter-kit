@@ -1,4 +1,3 @@
-// app/runs/[id]/page.tsx - Run detail page
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -13,6 +12,7 @@ export default function RunDetailPage() {
   const runId = params.id as string;
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isFinalizingRun, setIsFinalizingRun] = useState(false);
 
   useEffect(() => {
     if (runId) {
@@ -26,6 +26,28 @@ export default function RunDetailPage() {
     try {
       const data = await getRun(runId);
       setRun(data);
+      
+      // Auto-finalize if status is RUNNING and we haven't finalized yet
+      if (data.status === 'RUNNING' && !data.finished_at && !isFinalizingRun) {
+        setIsFinalizingRun(true);
+        try {
+          console.log('Auto-finalizing run:', runId);
+          const finalizeResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/finalize/${runId}`, {
+            method: 'POST'
+          });
+          
+          if (finalizeResponse.ok) {
+            const finalizedData = await finalizeResponse.json();
+            setRun(finalizedData);
+          } else {
+            console.error('Finalize request failed:', finalizeResponse.status);
+          }
+        } catch (finalizeError) {
+          console.error('Auto-finalize failed:', finalizeError);
+        } finally {
+          setIsFinalizingRun(false);
+        }
+      }
     } catch (error) {
       console.error('Failed to load run:', error);
     } finally {
@@ -82,10 +104,15 @@ export default function RunDetailPage() {
                     Finished: {new Date(run.finished_at).toLocaleString()}
                   </span>
                 )}
+                {isFinalizingRun && (
+                  <span className="text-sm text-blue-600 font-medium">
+                    Finalizing...
+                  </span>
+                )}
               </div>
             </div>
 
-            {(run.status === 'PENDING' || run.status === 'RUNNING') && (
+            {(run.status === 'PENDING' || run.status === 'RUNNING') && !isFinalizingRun && (
               <button
                 onClick={handleCancel}
                 className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
@@ -136,7 +163,7 @@ export default function RunDetailPage() {
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-lg font-semibold mb-4">Generated Assets</h2>
               {run.artifacts && run.artifacts.length > 0 ? (
-                <AssetGrid artifacts={run.artifacts} />
+                <AssetGrid artifacts={run.artifacts} runId={runId} />
               ) : (
                 <div className="text-center py-12 text-gray-500">
                   {run.status === 'COMPLETED' ? 'No assets generated' : 'Assets will appear here when generation completes'}
