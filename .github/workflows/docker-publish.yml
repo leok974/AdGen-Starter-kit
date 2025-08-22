@@ -91,7 +91,7 @@ jobs:
           image: '${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/adgen-api:${{ github.sha }}'
           region: '${{ secrets.GAR_LOCATION }}'
           flags: '--allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=80 --port=8080'
-          env_vars: 'ENV=staging,COMFY_MODE=test'
+          env_vars: 'ENV=staging,COMFY_MODE=test,CORS_ORIGINS=http://localhost:3000,https://your-vercel-domain.vercel.app'
 
       - name: Smoke test
         run: |

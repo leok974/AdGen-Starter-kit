@@ -12,17 +12,18 @@ from orchestrator import create_run, kickoff_generation, list_runs, get_run_deta
 app = FastAPI(title="AdGen API", version="0.1.0")
 
 # --- Configuration ---
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000").split(",")
 RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
 GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
 
-# --- Middleware ---
+# Configure CORS origins from environment variable
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
