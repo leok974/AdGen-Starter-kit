@@ -90,31 +90,33 @@ async def on_startup():
                 # On Windows, just do a best-effort sweep without locking
                 have_lock = True
 
-            kept, removed = 0, 0
-            for p in RUNS_DIR.iterdir():
-                try:
-                    if p.is_dir() and p.stat().st_mtime < cutoff:
-                        shutil.rmtree(p)
-                        removed += 1
-                        z = RUNS_DIR / f"{p.name}.zip"
-                        if z.exists():
-                            z.unlink()
-                    elif p.is_dir():
-                        kept += 1
-                except Exception as e:
-                    print(f"⚠️ Retention error for {p}: {e}")
+            if have_lock:
+                kept, removed = 0, 0
+                for p in RUNS_DIR.iterdir():
+                    try:
+                        if p.is_dir() and p.stat().st_mtime < cutoff:
+                            shutil.rmtree(p)
+                            removed += 1
+                            z = RUNS_DIR / f"{p.name}.zip"
+                            if z.exists():
+                                z.unlink()
+                        elif p.is_dir():
+                            kept += 1
+                    except Exception as e:
+                        print(f"⚠️ Retention error for {p}: {e}")
 
-            print(f"🧹 Retention sweep: kept={kept}, removed={removed}")
+                print(f"🧹 Retention sweep: kept={kept}, removed={removed}")
 
         except (OSError, IOError):
             print("🔒 Retention sweep skipped (another instance running)")
         finally:
             try:
                 if f is not None:
-                    fcntl and fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # type: ignore
+                    if fcntl:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                     f.close()
                 if lock_file.exists():
-                    lock_file.unlink(missing_ok=True)  # py3.8+: guard if needed
+                    lock_file.unlink(missing_ok=True)
             except Exception:
                 pass
 
