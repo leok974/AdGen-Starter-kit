@@ -1,5 +1,6 @@
+[![Docker Publish](https://github.com/leok974/AdGen-Starter-kit/actions/workflows/docker-publish.yml/badge.svg?event=push)](https://github.com/leok974/AdGen-Starter-kit/actions/workflows/docker-publish.yml)
+[![CI](https://github.com/leok974/AdGen-Starter-kit/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/leok974/AdGen-Starter-kit/actions/workflows/ci.yml)
 # AdGen-Starter-kit
-
 ## 🧪 Testing & Deployment
 
 ### Smoke Tests
