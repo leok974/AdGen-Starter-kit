@@ -45,6 +45,8 @@ gcloud run deploy "$SERVICE" \
   --set-env-vars GRAPH_PATH=/app/adgen/graphs/qwen.json \
   --set-env-vars COMFY_API="$COMFY_ENDPOINT" \
   --set-env-vars RUN_RETENTION_HOURS=2 \
+  --set-env-vars "CORS_ORIGINS=https://<PROD_VERCEL_DOMAIN>,http://localhost:3000,http://127.0.0.1:3000" \
+  --set-env-vars "CORS_ORIGIN_REGEX=https://.*\.vercel\.app$" \
   --project "$PROJECT_ID"
 
 # Get service URL
