@@ -32,38 +32,21 @@ RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
 GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
 
-# CORS: allow explicit origins + optional regex (for Vercel previews)
-# Examples:
-#   CORS_ORIGINS=https://your-prod.vercel.app,http://localhost:3000
-#   CORS_ORIGIN_REGEX=https://.*\.vercel\.app$
-_origins_env = os.getenv("CORS_ORIGINS", "")
-CORS_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
-CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX") or None
-CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+# --- CORS config ---
+origins_env = os.getenv("CORS_ORIGINS", "")  # e.g. "https://my-prod.vercel.app,http://localhost:3000"
+cors_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+cors_origin_regex = os.getenv("CORS_ORIGIN_REGEX")  # e.g. r"https://.*\.vercel\.app$"
+cors_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS if CORS_ORIGINS else ["*"],
-    allow_origin_regex=CORS_ORIGIN_REGEX,
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_origins=cors_origins,           # explicit allow-list
+    allow_origin_regex=cors_origin_regex, # previews like *.vercel.app
+    allow_credentials=cors_allow_credentials,
+    allow_methods=["*"],                  # includes OPTIONS
     allow_headers=["*"],
 )
 
-# Explicit OPTIONS handler for preflight requests
-@app.options("/{path:path}")
-async def options_handler(request: Request):
-    origin = request.headers.get("origin")
-    response = Response()
-    
-    if origin:
-        # Add explicit CORS headers for OPTIONS requests
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    
-    return response
 
 class GenerateBody(BaseModel):
     prompt: str
@@ -82,9 +65,9 @@ async def on_startup():
     print(f"   RUNS_DIR:   {RUNS_DIR}")
     print(f"   GRAPH_PATH: {GRAPH_PATH} {'(MISSING!)' if not Path(GRAPH_PATH).exists() else ''}")
     print(f"   COMFY_API:  {COMFY_API}")
-    print(f"   CORS_ORIGINS: {CORS_ORIGINS or '[]'}")
-    print(f"   CORS_ORIGIN_REGEX: {CORS_ORIGIN_REGEX or '(none)'}")
-    print(f"   Allow-Credentials: {CORS_ALLOW_CREDENTIALS}")
+    print(f"   CORS_ORIGINS: {cors_origins or '[]'}")
+    print(f"   CORS_ORIGIN_REGEX: {cors_origin_regex or '(none)'}")
+    print(f"   Allow-Credentials: {cors_allow_credentials}")
     print(f"   MODE: {os.getenv('COMFY_MODE', 'production')}")
 
     # Retention sweep for old runs (safe on Cloud Run; tolerant on Windows)
