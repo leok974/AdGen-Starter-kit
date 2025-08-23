@@ -2,7 +2,6 @@
 import os
 import time
 import shutil
-import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, status, Request
@@ -33,17 +32,18 @@ RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
 GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
 
-# Configure CORS: explicit origins + optional regex for Vercel previews
-origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+# --- CORS config ---
+origins_env = os.getenv("CORS_ORIGINS", "")  # e.g. "https://my-prod.vercel.app,http://localhost:3000"
 cors_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
 cors_origin_regex = os.getenv("CORS_ORIGIN_REGEX")  # e.g. r"https://.*\.vercel\.app$"
+cors_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_origin_regex=cors_origin_regex,  # enable previews like https://*-vercel.app
-    allow_credentials=True,
-    allow_methods=["*"],   # includes OPTIONS for preflight
+    allow_origins=cors_origins,           # explicit allow-list
+    allow_origin_regex=cors_origin_regex, # previews like *.vercel.app
+    allow_credentials=cors_allow_credentials,
+    allow_methods=["*"],                  # includes OPTIONS
     allow_headers=["*"],
 )
 
@@ -65,9 +65,9 @@ async def on_startup():
     print(f"   RUNS_DIR:   {RUNS_DIR}")
     print(f"   GRAPH_PATH: {GRAPH_PATH} {'(MISSING!)' if not Path(GRAPH_PATH).exists() else ''}")
     print(f"   COMFY_API:  {COMFY_API}")
-    print(f"   CORS_ORIGINS: {CORS_ORIGINS or '[]'}")
-    print(f"   CORS_ORIGIN_REGEX: {CORS_ORIGIN_REGEX or '(none)'}")
-    print(f"   Allow-Credentials: {CORS_ALLOW_CREDENTIALS}")
+    print(f"   CORS_ORIGINS: {cors_origins or '[]'}")
+    print(f"   CORS_ORIGIN_REGEX: {cors_origin_regex or '(none)'}")
+    print(f"   Allow-Credentials: {cors_allow_credentials}")
     print(f"   MODE: {os.getenv('COMFY_MODE', 'production')}")
 
     # Retention sweep for old runs (safe on Cloud Run; tolerant on Windows)
