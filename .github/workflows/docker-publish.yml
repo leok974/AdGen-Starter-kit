@@ -92,15 +92,6 @@ jobs:
           region: '${{ secrets.GAR_LOCATION }}'
           flags: '--allow-unauthenticated --min-instances=0 --max-instances=3 --concurrency=80 --port=8080'
           env_vars: 'ENV=staging,COMFY_MODE=test,CORS_ORIGINS=http://localhost:3000,https://ad-gen-starter-kit.vercel.app,CORS_ORIGIN_REGEX=https://ad-gen-starter-.*\.vercel\.app$'
-          
-      - name: Smoke test
-        run: |
-          set -e
-          for i in {1..20}; do
-            echo "Health attempt $i"
-            curl -sf "${{ steps.deploy.outputs.url }}/health" && break || sleep 2
-          done
-          curl -sf "${{ steps.deploy.outputs.url }}/"
 
       - name: Smoke test
         run: |
