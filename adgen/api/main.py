@@ -4,9 +4,9 @@ import time
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 # Optional on Windows (fcntl is POSIX-only)
@@ -43,12 +43,27 @@ CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,       # explicit list (echoed back by middleware)
-    allow_origin_regex=CORS_ORIGIN_REGEX,  # optional regex (e.g., for Vercel previews)
+    allow_origins=CORS_ORIGINS if CORS_ORIGINS else ["*"],
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["*"],              # ensures OPTIONS is handled for preflight
-    allow_headers=["*"],              # includes Authorization, Content-Type, etc.
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
+
+# Explicit OPTIONS handler for preflight requests
+@app.options("/{path:path}")
+async def options_handler(request: Request):
+    origin = request.headers.get("origin")
+    response = Response()
+    
+    if origin:
+        # Add explicit CORS headers for OPTIONS requests
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 
 class GenerateBody(BaseModel):
     prompt: str
@@ -63,7 +78,7 @@ async def on_startup():
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Helpful boot logs
-    print("✅ AdGen API starting")
+    print("AdGen API starting")
     print(f"   RUNS_DIR:   {RUNS_DIR}")
     print(f"   GRAPH_PATH: {GRAPH_PATH} {'(MISSING!)' if not Path(GRAPH_PATH).exists() else ''}")
     print(f"   COMFY_API:  {COMFY_API}")
@@ -103,12 +118,12 @@ async def on_startup():
                         elif p.is_dir():
                             kept += 1
                     except Exception as e:
-                        print(f"⚠️ Retention error for {p}: {e}")
+                        print(f"Retention error for {p}: {e}")
 
-                print(f"🧹 Retention sweep: kept={kept}, removed={removed}")
+                print(f"Retention sweep: kept={kept}, removed={removed}")
 
         except (OSError, IOError):
-            print("🔒 Retention sweep skipped (another instance running)")
+            print("Retention sweep skipped (another instance running)")
         finally:
             try:
                 if f is not None:
@@ -121,7 +136,7 @@ async def on_startup():
                 pass
 
     except Exception as e:
-        print(f"⚠️ Retention sweep failed: {e}")
+        print(f"Retention sweep failed: {e}")
 
 
 @app.get("/")
@@ -270,7 +285,7 @@ def delete_run(run_id: str):
         if zip_path.exists():
             zip_path.unlink()
 
-        print(f"🗑️ Deleted run: {run_id}")
+        print(f"Deleted run: {run_id}")
     except Exception as e:
-        print(f"⚠️ Delete error for {run_id}: {e}")
+        print(f"Delete error for {run_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
