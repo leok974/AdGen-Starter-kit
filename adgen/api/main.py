@@ -1,29 +1,14 @@
-# adgen/api/main.py
+# api/main.py
 import os
-import time
-import shutil
+import time, shutil, fcntl
+from fastapi import status
+import re
 from pathlib import Path
-
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-
-# Optional on Windows (fcntl is POSIX-only)
-try:
-    import fcntl  # type: ignore
-except Exception:  # pragma: no cover
-    fcntl = None  # fallback for Windows dev
-
-from orchestrator import (
-    create_run,
-    kickoff_generation,
-    list_runs,
-    get_run_detail,
-    cancel_run,
-    finalize_run,
-    _update_run_status,
-)
+from orchestrator import create_run, kickoff_generation, list_runs, get_run_detail, cancel_run, finalize_run, _update_run_status
 
 app = FastAPI(title="AdGen API", version="0.1.0")
 
@@ -32,22 +17,18 @@ RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
 GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
 
-# CORS: allow explicit origins + optional regex (for Vercel previews)
-# Examples:
-#   CORS_ORIGINS=https://your-prod.vercel.app,http://localhost:3000
-#   CORS_ORIGIN_REGEX=https://.*\.vercel\.app$
-_origins_env = os.getenv("CORS_ORIGINS", "")
-CORS_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
-CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX") or None
-CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+# Configure CORS: explicit origins + optional regex for Vercel previews
+origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+cors_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+cors_origin_regex = os.getenv("CORS_ORIGIN_REGEX")  # e.g. r"https://.*\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,       # explicit list (echoed back by middleware)
-    allow_origin_regex=CORS_ORIGIN_REGEX,  # optional regex (e.g., for Vercel previews)
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["*"],              # ensures OPTIONS is handled for preflight
-    allow_headers=["*"],              # includes Authorization, Content-Type, etc.
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,  # enable previews like https://*-vercel.app
+    allow_credentials=True,
+    allow_methods=["*"],   # includes OPTIONS for preflight
+    allow_headers=["*"],
 )
 
 class GenerateBody(BaseModel):
@@ -62,41 +43,33 @@ class GenerateBody(BaseModel):
 async def on_startup():
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Helpful boot logs
-    print("✅ AdGen API starting")
-    print(f"   RUNS_DIR:   {RUNS_DIR}")
-    print(f"   GRAPH_PATH: {GRAPH_PATH} {'(MISSING!)' if not Path(GRAPH_PATH).exists() else ''}")
-    print(f"   COMFY_API:  {COMFY_API}")
-    print(f"   CORS_ORIGINS: {CORS_ORIGINS or '[]'}")
-    print(f"   CORS_ORIGIN_REGEX: {CORS_ORIGIN_REGEX or '(none)'}")
-    print(f"   Allow-Credentials: {CORS_ALLOW_CREDENTIALS}")
-    print(f"   MODE: {os.getenv('COMFY_MODE', 'production')}")
+    # Validate required files
+    if not Path(GRAPH_PATH).exists():
+        print(f"⚠️ Warning: Graph file not found at {GRAPH_PATH}")
 
-    # Retention sweep for old runs (safe on Cloud Run; tolerant on Windows)
+    print(f"✅ AdGen API starting")
+    print(f"   RUNS_DIR: {RUNS_DIR}")
+    print(f"   GRAPH_PATH: {GRAPH_PATH}")
+    print(f"   COMFY_API: {COMFY_API}")
+    print(f"   TEST_MODE: {os.getenv('COMFY_MODE', 'production')}")
+
+    # Retention sweep for old runs (with file locking for Cloud Run safety)
     try:
         max_age_hours = int(os.getenv("RUN_RETENTION_HOURS", "24"))
         cutoff = time.time() - max_age_hours * 3600
         lock_file = RUNS_DIR / ".retention_lock"
 
-        have_lock = False
-        f = None
         try:
-            # Only do inter-process file lock if fcntl is available (Linux)
-            if fcntl is not None:
-                f = lock_file.open("w")
+            with lock_file.open('w') as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                have_lock = True
-            else:
-                # On Windows, just do a best-effort sweep without locking
-                have_lock = True
 
-            if have_lock:
                 kept, removed = 0, 0
                 for p in RUNS_DIR.iterdir():
                     try:
                         if p.is_dir() and p.stat().st_mtime < cutoff:
                             shutil.rmtree(p)
                             removed += 1
+                            # Also remove corresponding zip
                             z = RUNS_DIR / f"{p.name}.zip"
                             if z.exists():
                                 z.unlink()
@@ -111,13 +84,8 @@ async def on_startup():
             print("🔒 Retention sweep skipped (another instance running)")
         finally:
             try:
-                if f is not None:
-                    if fcntl:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    f.close()
-                if lock_file.exists():
-                    lock_file.unlink(missing_ok=True)
-            except Exception:
+                lock_file.unlink()
+            except FileNotFoundError:
                 pass
 
     except Exception as e:
@@ -137,17 +105,20 @@ def health():
 @app.get("/health/detailed")
 def detailed_health():
     """Detailed health check including external dependencies"""
-    status_obj = {"api": "ok", "timestamp": time.time()}
+    status = {"api": "ok", "timestamp": time.time()}
 
     # Check runs directory
     try:
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
-        status_obj["storage"] = "ok"
+        status["storage"] = "ok"
     except Exception as e:
-        status_obj["storage"] = f"error: {e}"
+        status["storage"] = f"error: {e}"
 
     # Check graph file
-    status_obj["graph"] = "ok" if Path(GRAPH_PATH).exists() else f"missing: {GRAPH_PATH}"
+    if Path(GRAPH_PATH).exists():
+        status["graph"] = "ok"
+    else:
+        status["graph"] = f"missing: {GRAPH_PATH}"
 
     # Check ComfyUI connectivity (skip in test mode)
     if os.getenv("COMFY_MODE", "").lower() != "test":
@@ -155,33 +126,37 @@ def detailed_health():
             import httpx
             with httpx.Client(timeout=5) as client:
                 resp = client.get(f"{COMFY_API}/")
-                status_obj["comfy"] = "ok" if resp.status_code == 200 else f"status: {resp.status_code}"
+                status["comfy"] = "ok" if resp.status_code == 200 else f"status: {resp.status_code}"
         except Exception as e:
-            status_obj["comfy"] = f"error: {e}"
+            status["comfy"] = f"error: {e}"
     else:
-        status_obj["comfy"] = "test_mode"
+        status["comfy"] = "test_mode"
 
-    overall_ok = all(v in ("ok", "test_mode") for k, v in status_obj.items() if k != "timestamp")
-    status_obj["ok"] = overall_ok
-    return status_obj
+    overall_ok = all(v == "ok" or v == "test_mode" for v in status.values() if v != status["timestamp"])
+    status["ok"] = overall_ok
+
+    return status
 
 
 @app.post("/generate")
 def generate(body: GenerateBody):
     try:
         # Always create run first
-        payload = body.dict()
-        result = create_run(payload)
+        result = create_run(body.dict())
         run_id = result["run_id"]
 
         try:
             # Attempt to start generation
-            generation_result = kickoff_generation(run_id, payload)
+            generation_result = kickoff_generation(run_id, body.dict())
             return generation_result
         except Exception as e:
             # Mark run as failed but still return run_id
             _update_run_status(run_id, "FAILED", str(e))
-            return {"run_id": run_id, "status": "FAILED", "error": str(e)}
+            return {
+                "run_id": run_id,
+                "status": "FAILED",
+                "error": str(e)
+            }
     except Exception as e:
         # Only return 500 if we can't even create the run
         raise HTTPException(status_code=500, detail=str(e))
@@ -205,8 +180,6 @@ async def get_run_detail_endpoint(run_id: str):
         if detail is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return detail
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"[/runs/{run_id}] ERROR: {repr(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -240,11 +213,7 @@ def download_zip(run_id: str):
         zip_path = RUNS_DIR / f"{run_id}.zip"
         if not zip_path.exists():
             raise FileNotFoundError(f"Zip file not found for run_id: {run_id}")
-        return FileResponse(
-            str(zip_path),
-            media_type="application/zip",
-            filename=zip_path.name,
-        )
+        return FileResponse(str(zip_path), media_type="application/zip", filename=zip_path.name)
     except FileNotFoundError as e:
         print(f"[/download/{run_id}] ERROR: {repr(e)}")
         raise HTTPException(status_code=404, detail=str(e))
@@ -271,6 +240,7 @@ def delete_run(run_id: str):
             zip_path.unlink()
 
         print(f"🗑️ Deleted run: {run_id}")
+
     except Exception as e:
         print(f"⚠️ Delete error for {run_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
