@@ -4,9 +4,9 @@ import time
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Optional on Windows (fcntl is POSIX-only)
@@ -32,38 +32,20 @@ RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
 GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
 
-# CORS: allow explicit origins + optional regex (for Vercel previews)
-# Examples:
-#   CORS_ORIGINS=https://your-prod.vercel.app,http://localhost:3000
-#   CORS_ORIGIN_REGEX=https://.*\.vercel\.app$
-_origins_env = os.getenv("CORS_ORIGINS", "")
-CORS_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
-CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX") or None
+# --- CORS config (explicit allow-list + optional regex for *.vercel.app previews) ---
+origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+CORS_ORIGINS = [o.strip() for o in origins_env.split(",") if o.strip()]
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX") or None  # e.g. r"https://.*\.vercel\.app$"
 CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS if CORS_ORIGINS else ["*"],
-    allow_origin_regex=CORS_ORIGIN_REGEX,
+    allow_origins=CORS_ORIGINS,            # explicit list (e.g., prod domain + localhost)
+    allow_origin_regex=CORS_ORIGIN_REGEX,  # wildcard previews (*.vercel.app)
     allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_methods=["*"],                   # includes OPTIONS for preflight
+    allow_headers=["*"],                   # includes Authorization, Content-Type, etc.
 )
-
-# Explicit OPTIONS handler for preflight requests
-@app.options("/{path:path}")
-async def options_handler(request: Request):
-    origin = request.headers.get("origin")
-    response = Response()
-    
-    if origin:
-        # Add explicit CORS headers for OPTIONS requests
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    
-    return response
 
 class GenerateBody(BaseModel):
     prompt: str
