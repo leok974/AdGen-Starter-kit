@@ -64,9 +64,9 @@ async def on_startup():
     print(f"   RUNS_DIR:   {RUNS_DIR}")
     print(f"   GRAPH_PATH: {GRAPH_PATH} {'(MISSING!)' if not Path(GRAPH_PATH).exists() else ''}")
     print(f"   COMFY_API:  {COMFY_API}")
-    print(f"   CORS_ORIGINS: {CORS_ORIGINS or '[]'}")
-    print(f"   CORS_ORIGIN_REGEX: {CORS_ORIGIN_REGEX or '(none)'}")
-    print(f"   Allow-Credentials: {CORS_ALLOW_CREDENTIALS}")
+    print(f"   CORS_ORIGINS: {cors_origins or '[]'}")
+    print(f"   CORS_ORIGIN_REGEX: {cors_origin_regex or '(none)'}")
+    print(f"   Allow-Credentials: {cors_allow_credentials}")
     print(f"   MODE: {os.getenv('COMFY_MODE', 'production')}")
 
     # Retention sweep for old runs (safe on Cloud Run; tolerant on Windows)
