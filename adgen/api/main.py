@@ -32,19 +32,19 @@ RUNS_DIR = Path(os.getenv("RUNS_DIR", "/app/adgen/runs")).resolve()
 COMFY_API = os.getenv("COMFY_API", "http://host.docker.internal:8188").rstrip("/")
 GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/adgen/graphs/qwen.json")
 
-# --- CORS config (explicit allow-list + optional regex for *.vercel.app previews) ---
-origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
-CORS_ORIGINS = [o.strip() for o in origins_env.split(",") if o.strip()]
-CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX") or None  # e.g. r"https://.*\.vercel\.app$"
-CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+# --- CORS config (explicit list + regex for *.vercel.app previews) ---
+origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+cors_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+cors_origin_regex = os.getenv("CORS_ORIGIN_REGEX") or None  # e.g. r"https://.*\.vercel\.app$"
+cors_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,            # explicit list (e.g., prod domain + localhost)
-    allow_origin_regex=CORS_ORIGIN_REGEX,  # wildcard previews (*.vercel.app)
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["*"],                   # includes OPTIONS for preflight
-    allow_headers=["*"],                   # includes Authorization, Content-Type, etc.
+    allow_origins=cors_origins,            # explicit list (prod + localhost)
+    allow_origin_regex=cors_origin_regex,  # wildcard previews (*.vercel.app)
+    allow_credentials=cors_allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class GenerateBody(BaseModel):
